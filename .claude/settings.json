@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tasklist *)",
+      "Bash(vercel --version)",
+      "Bash(vercel whoami)",
+      "Bash(vercel ls)",
+      "Bash(vercel domains ls)",
+      "Bash(vercel inspect *)",
+      "Bash(vercel env ls *)",
+      "mcp__notebooklm__notebook_describe"
+    ]
+  }
+}
