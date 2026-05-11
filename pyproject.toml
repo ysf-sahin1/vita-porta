@@ -30,7 +30,7 @@ dependencies = [
 
     # Vision
     "opencv-python>=4.10",
-    "mediapipe>=0.10",
+    "mediapipe>=0.10.14,<0.10.20",  # Solutions API son taşıyan sürümler; 0.10.20+ Windows'ta sadece Tasks API var
     "numpy>=1.26",
 
     # IO
@@ -40,6 +40,7 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "sse-starlette>=2.1",
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
