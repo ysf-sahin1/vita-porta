@@ -2,7 +2,7 @@
 
 Bu dosya geliştirme oturumlarının kaldığı yerden devam edebilmesi için tutulur. Her faz: durum, neyin tamamlandığı, neyin kaldığı, ilgili dosyalar ve doğrulama yöntemi.
 
-**Genel durum:** 6/8 faz tamamlandı. Sistem uçtan uca canlı çalışıyor (mock veriyle). Gerçek kamera ajanları ve edge firmware kaldı.
+**Genel durum:** 7/8 faz tamamlandı. Sistem uçtan uca canlı çalışıyor (mock + gerçek kamera). Edge firmware ve Docker infrastructure kaldı.
 
 ---
 
@@ -173,32 +173,52 @@ npm run dev                # http://127.0.0.1:3000
 
 ---
 
-## Faz 5 — Görsel ajanlar (gait / skin / respiration)
+## Faz 5 — Çoklu Modalite Ajanları (gait / skin / respiration / thermal / expression)
 
-**Durum:** 🟡 Yarıda kaldı — sadece base abstraksiyonu yazıldı
+**Durum:** 🟡 Kısmen Tamamlandı (Temel ajanlar devrede, yeni ajanlar planlandı)
 
-### Yapılanlar (kısmi)
-- `gateway_agents/__init__.py`
-- `gateway_agents/agents/__init__.py` — `Agent`, `AnalysisWindow`, `GaitAgent`, `SkinAgent`, `RespirationAgent` re-export
-- `gateway_agents/agents/base.py` — `AnalysisWindow` dataclass (frames + fps) + soyut `Agent` sınıfı
+### Yapılanlar
 
-### Kalanlar
-- `gateway_agents/agents/gait.py` — MediaPipe Pose ile iskelet noktaları, simetri, sallanma, adım örüntüsü
-- `gateway_agents/agents/skin.py` — OpenCV HSV/LAB renk uzayında solgunluk eşiklemesi
-- `gateway_agents/agents/respiration.py` — Optik akış / frame-fark ile göğüs hareketi ve solunum hızı
-- `gateway_agents/io/` — frame kaynakları:
-  - `WebcamSource` — bilgisayar kamerasından OpenCV ile yakalama
-  - `VideoFileSource` — önceden çekilmiş test videolarını oynatma (jüri için fallback)
-  - `MqttSource` — ESP32-CAM'den gelen MQTT akışı (pilot için)
-- `gateway_agents/runner.py` — frame'leri toplayıp üç ajanı paralel koşturup backend'in `/api/triage/run` ucuna POST eden orchestrator
-- `gateway_agents/tests/` — sentetik video frameleriyle birim testleri
+**Mevcut Görsel Ajanlar** (`gateway_agents/agents/`):
+- `base.py` — `AnalysisWindow` dataclass + soyut `Agent` sınıfı
+- `gait.py` — `GaitAgent`: MediaPipe Pose, omuz/kalça x-std (sway eşiği 0.025), shoulder asymmetry (eşik 0.04). Confidence = visibility ortalaması (omuz + kalça landmarks). Lazy mediapipe import.
+- `skin.py` — `SkinAgent`: OpenCV Haar Cascade yüz tespiti + HSV (S_pale<80, V_pale>120). Dim brightness (V<60) → confidence 0.5 cap. 5 frame örnekleme.
+- `respiration.py` — `RespirationAgent`: Sabit göğüs ROI (40% × 30%), frame-diff (threshold 25), smoothed peak detection, BPM kategorileri (yavaş<10, normal 10-22, hızlı>22, düzensiz CV>0.5). Erratic motion (CV>1.0) → confidence 0.2.
 
-### Bağımlılıklar (zaten `pyproject.toml`'da)
-`mediapipe>=0.10`, `opencv-python>=4.10`, `numpy>=1.26`, `paho-mqtt>=2.1`
+### Yapılacaklar (Planlanan Yeni Ajanlar)
+- 🔴 `thermal.py` — **Vücut Sıcaklığı Ajanı**: MLX90640 / FLIR Lepton termal kamera verilerini analiz ederek bölgesel sıcaklık istatistikleri (ateş > 37.5 °C veya hipotermi < 35.5 °C) çıkaracak.
+- 🔴 `expression.py` — **Yüz İfadesi Ajanı**: MediaPipe Face Mesh ile ağrı, distres, anksiyete ve yüz simetrisi bozukluklarını saptayacak.
+
+**IO kaynakları** (`gateway_agents/io/`):
+- `base.py` — `FrameSource` ABC (`fps`, `frames()`, `close()`, context manager)
+- `webcam.py` — `WebcamSource`: cv2.VideoCapture (Windows CAP_DSHOW fallback), target_fps + width/height ayarları
+- `video_file.py` — `VideoFileSource`: native fps okur, `loop=True` desteği (jüri fallback için)
+- `mqtt.py` — `MqttSource`: paho-mqtt `loop_start`, JPEG decode, drop-oldest `Queue(maxsize=64)`. Lazy import.
+
+**Runner** (`gateway_agents/runner.py`):
+- `Runner(source, backend_url, window_duration_s=3.0, max_workers=3)`
+- `ThreadPoolExecutor` ile üç ajan paralel
+- `httpx.Client` ile `POST /api/triage/run` (10s timeout)
+- Backend ulaşılamazsa warning + devam (loop crash etmez)
+- `run_once()`, `run_forever()`, context manager support
+- CLI: `python -m gateway_agents.runner [--webcam IDX | --video PATH | --mqtt]`
+
+**Testler** (`gateway_agents/tests/`):
+- `test_agents.py` — 12 test: empty window, black frames, periodic motion, schema conformance (parametrize)
+- `test_runner.py` — 6 test: FakeFrameSource + monkeypatched httpx, partial window, backend unreachable, context manager
+
+### Doğrulama
+
+```bash
+python -m pytest orchestration/tests gateway_agents/tests -v   # 23/23 ✅ (5 supervisor + 18 gateway)
+python -m gateway_agents.runner --webcam 0                      # Canlı kamera demo
+python -m gateway_agents.runner --video docs/test_clip.mp4      # Video dosyası fallback
+```
 
 ### Notlar
-- NotebookLM "Hackathon 1-2 günde minimum prototip" tavsiyesi: solunum ajanını basitleştirip frame-fark eşiği (hızlı/normal) ile kısa kes; gait ve skin'e ağırlık ver
-- Webcam fallback ESP32-CAM olmadan jüri sunumunda yeterli; firmware **sonra** gelir
+- NotebookLM rehberi izlendi: solunum frame-fark ile basitleştirildi, gait + skin için kalibrasyon eşikleri NotebookLM önerilerine uygun.
+- Mediapipe `>=0.10.14,<0.10.20` pinli (Windows'ta Solutions API son sürümleri).
+- IO sözleşmesi: frame-emitting (`frames() -> Iterator[ndarray]`), runner window'u kendisi batchler.
 
 ---
 
