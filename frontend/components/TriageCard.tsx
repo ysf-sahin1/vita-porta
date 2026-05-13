@@ -49,14 +49,20 @@ export function TriageCard({ decision }: { decision: TriageDecision }) {
         </div>
       </div>
       <p className="mt-5 text-slate-700 leading-relaxed">{decision.rationale_tr}</p>
-      <div className="mt-5 grid grid-cols-3 gap-3 text-sm">
-        {(["gait", "skin", "respiration"] as const).map((name) => {
+      <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+        {(["gait", "skin", "respiration", "thermal"] as const).map((name) => {
           const w = decision.per_agent_weights[name] ?? 0;
+          const label =
+            name === "gait"
+              ? "Yürüyüş"
+              : name === "skin"
+                ? "Ten Rengi"
+                : name === "respiration"
+                  ? "Solunum"
+                  : "Termal";
           return (
             <div key={name} className="rounded-lg border border-slate-200 p-3 bg-slate-50/50">
-              <div className="text-[11px] uppercase text-slate-500 tracking-wide">
-                {name === "gait" ? "Yürüyüş" : name === "skin" ? "Ten Rengi" : "Solunum"}
-              </div>
+              <div className="text-[11px] uppercase text-slate-500 tracking-wide">{label}</div>
               <div className="mt-2 h-1.5 rounded bg-slate-200 overflow-hidden">
                 <div
                   className={cn("h-full", style.fg.replace("text-", "bg-"))}

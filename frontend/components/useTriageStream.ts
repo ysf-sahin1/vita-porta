@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 
 export interface PatientState {
   patientId: string;
-  observations: Partial<Record<"gait" | "skin" | "respiration", AgentObservation>>;
+  observations: Partial<Record<"gait" | "skin" | "respiration" | "thermal", AgentObservation>>;
   decision?: TriageDecision;
   updatedAt: number;
 }

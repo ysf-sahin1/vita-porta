@@ -6,7 +6,7 @@ AgentBundle üretip backend'in /api/triage/run endpoint'ine POST eder.
 Kullanım:
     python -m gateway_agents.runner --source webcam
     python -m gateway_agents.runner --source video --path data/demo/red.mp4 --loop
-    python -m gateway_agents.runner --source webcam --dry-run   # backend'e göndermez, stdout'a basar
+    python -m gateway_agents.runner --source webcam --dry-run   # backend'e POST yok
 """
 
 from __future__ import annotations
@@ -55,10 +55,11 @@ class GatewayRunner:
                 bundle = await self._analyze_window(window)
                 if self.dry_run:
                     logger.info(
-                        "DRY-RUN bundle: gait=%s skin=%s resp=%s",
+                        "DRY-RUN bundle: gait=%s skin=%s resp=%s thermal=%s",
                         bundle.gait and bundle.gait.summary_tr,
                         bundle.skin and bundle.skin.summary_tr,
                         bundle.respiration and bundle.respiration.summary_tr,
+                        bundle.thermal and bundle.thermal.summary_tr,
                     )
                     continue
                 try:

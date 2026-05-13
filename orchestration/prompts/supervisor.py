@@ -77,7 +77,8 @@ def build_supervisor_user_prompt(bundle: AgentBundle, rag_snippets: list[str]) -
             }
         )
 
-    missing = sorted({"gait", "skin", "respiration", "thermal"} - {o["agent"] for o in observations})
+    seen = {o["agent"] for o in observations}
+    missing = sorted({"gait", "skin", "respiration", "thermal"} - seen)
 
     payload = {
         "patient_id": bundle.patient_id,

@@ -61,7 +61,8 @@ class AgentBundle(BaseModel):
     captured_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     def observations(self) -> list[AgentObservation]:
-        return [obs for obs in (self.gait, self.skin, self.respiration, self.thermal) if obs is not None]
+        candidates = (self.gait, self.skin, self.respiration, self.thermal)
+        return [obs for obs in candidates if obs is not None]
 
 
 class TriageDecision(BaseModel):

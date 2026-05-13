@@ -84,12 +84,14 @@ class MockLLMClient(LLMClient):
         if skin and skin["confidence"] >= 0.5:
             signals = skin.get("signals", {})
             pallor_score = float(signals.get("pallor_score", 0))
-            if signals.get("pallor") is True or signals.get("severity") == "high" or pallor_score >= 0.6:
+            severity = signals.get("severity")
+            if signals.get("pallor") is True or severity == "high" or pallor_score >= 0.6:
                 red_flags += 1
                 rationale_parts.append(
-                    f"Ten rengi ajanı %{int(skin['confidence']*100)} güvenle solgunluk tespit etti"
+                    f"Ten rengi ajanı %{int(skin['confidence']*100)} "
+                    "güvenle solgunluk tespit etti"
                 )
-            elif signals.get("severity") == "mild" or pallor_score >= 0.3:
+            elif severity == "mild" or pallor_score >= 0.3:
                 yellow_flags += 1
                 rationale_parts.append("Ten rengi ajanı hafif solgunluk tespit etti")
 
@@ -98,12 +100,14 @@ class MockLLMClient(LLMClient):
             signals = resp.get("signals", {})
             rate = float(signals.get("rate_bpm", 0) or signals.get("breath_per_minute", 0))
             pattern = signals.get("pattern", "")
-            if rate >= 24 or signals.get("severity") == "high" or pattern in ("hızlı", "apne_riski"):
+            severity = signals.get("severity")
+            if rate >= 24 or severity == "high" or pattern in ("hızlı", "apne_riski"):
                 red_flags += 1
                 rationale_parts.append(
-                    f"solunum ajanı %{int(resp['confidence']*100)} güvenle anormal solunum bildirdi"
+                    f"solunum ajanı %{int(resp['confidence']*100)} "
+                    "güvenle anormal solunum bildirdi"
                 )
-            elif rate >= 20 or signals.get("severity") == "mild" or pattern in ("yavaş", "düzensiz"):
+            elif rate >= 20 or severity == "mild" or pattern in ("yavaş", "düzensiz"):
                 yellow_flags += 1
                 rationale_parts.append("solunum ajanı hafif anormallik bildirdi")
 
@@ -111,10 +115,12 @@ class MockLLMClient(LLMClient):
         if gait and gait["confidence"] >= 0.5:
             signals = gait.get("signals", {})
             sway_score = float(signals.get("sway_score", 0))
-            if signals.get("sway") is True or signals.get("severity") == "high" or sway_score >= 0.6:
+            severity = signals.get("severity")
+            if signals.get("sway") is True or severity == "high" or sway_score >= 0.6:
                 yellow_flags += 1
                 rationale_parts.append(
-                    f"yürüyüş ajanı %{int(gait['confidence']*100)} güvenle sallantılı yürüyüş tespit etti"
+                    f"yürüyüş ajanı %{int(gait['confidence']*100)} "
+                    "güvenle sallantılı yürüyüş tespit etti"
                 )
 
         # Termal ajan: proxy modunda destekleyici sinyal, tek başına kırmızıya çekmez.
