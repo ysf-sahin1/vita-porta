@@ -2,7 +2,7 @@
 
 Bu dosya geliştirme oturumlarının kaldığı yerden devam edebilmesi için tutulur. Her faz: durum, neyin tamamlandığı, neyin kaldığı, ilgili dosyalar ve doğrulama yöntemi.
 
-**Genel durum:** 7.5/8 faz tamamlandı. Sistem **gerçek webcam'den canlı çalışıyor**: 4 görsel ajan (yürüyüş, ten rengi, solunum, termal) paralel işliyor, supervisor karar üretiyor, dashboard SSE ile yayınlıyor. Kalan: edge firmware + Docker compose (Faz 6) ve pitch polish (Faz 8).
+**Genel durum:** 7.5/8 faz tamamlandı. Sistem **gerçek webcam'den canlı çalışıyor**: 4 görsel ajan (yürüyüş, ten rengi, solunum, termal) paralel işliyor, supervisor karar üretiyor, dashboard SSE ile yayınlıyor. **mertmrz branch'i ile origin/main (Yusuf'un Phase 5 rewrite'ı) birleştirildi ve tüm değişiklikler ana projeye (ysf-sahin1/vita-porta) push'landı** (2026-05-13). Kalan: edge firmware + Docker compose (Faz 6) ve pitch polish (Faz 8).
 
 **NotebookLM bağlantısı:** Notebook ID `d9854800-b703-4b71-919f-6121bb3e05d8`. Proje bağlamı her oturumda NotebookLM'den çekilir.
 
@@ -140,6 +140,40 @@ Bu dosya geliştirme oturumlarının kaldığı yerden devam edebilmesi için tu
 - Demo videosu (yedek senaryo: webcam müsait değilse `VideoFileSource` ile önceden çekilmiş 5-10 saniyelik test videoları).
 - ESP32-CAM fiziksel prop (lehimleme + kasa) — jüri masasında "veri toplama konsepti" objesi.
 
+## Faz 5.5 — origin/main ile birleşme + bug fix turu · ✅ Tamamlandı (2026-05-13 öğleden sonra)
+
+**Bağlam:** `mertmrz` branch'i (termal ajan + macOS fix'leri) origin/main (Yusuf'un Phase 5 rewrite'ı) ile diverj etmişti. Yusuf'un commit'i `gait/skin/respiration/runner/io` üzerinde kapsamlı bir refactor getirmişti (sync Runner, `frames()`-tabanlı FrameSource, MQTT source, kapsamlı testler). Bu turda iki branch birleştirildi, integration bug'ları kapatıldı, ana projeye push'landı.
+
+**Bug fix turu (commit `9ddf0cd`):**
+- `gateway_agents/runner.py` — `--dry-run` log satırı sessizce thermal'i atlıyordu, eklendi.
+- `frontend/components/TriageCard.tsx` — Per-agent ağırlık paneli 3 sütundu, thermal weight veride vardı ama hiç gösterilmiyordu. 4 sütuna (`grid-cols-2 md:grid-cols-4`) geçirildi.
+- `frontend/components/useTriageStream.ts` — `PatientState.observations` tipi hâlâ 3 ajanlıydı (`gait | skin | respiration`), thermal eklendi.
+- `orchestration/llm.py`, `orchestration/prompts/supervisor.py`, `orchestration/schemas.py` — Termal eklemesinden kalan ruff E501 (long line) ihlalleri temizlendi.
+
+**Merge ve conflict çözümleri (commit `a099d15`):**
+- `gateway_agents/io/webcam.py` çakışması → Yusuf'un sürümü tercih edildi. Önce varsayılan backend (macOS'ta AVFoundation) denenip ardından sadece Windows fallback olarak `CAP_DSHOW`'a düşüyor; macOS'ta zaten çalışıyor. Ayrıca canlı önizleme (`cv2.imshow`) eklemesi geliştiriciye kameranın gördüğünü anında izleme imkânı veriyor.
+- `gateway_agents/runner.py` çakışması → Yusuf'un sync `Runner` mimarisi (context manager + `run_once`/`run_forever`) baz alındı, üzerine ThermalAgent paralel pipeline'a eklendi (`max_workers` 3→4, `_build_bundle` 4 ajan, `close()` thermal'i de kapatıyor).
+- **Sinyal sözlüğü uyumsuzluğu — sessiz integration bug** → Yusuf'un yeni ajanları farklı sinyal isimleri çıkartıyor: `skin_tone="solgun"` (eski `pallor:bool`), `sway_detected` (eski `sway_score`), `breathing_pattern`/`breaths_per_minute` (eski `pattern`/`breath_per_minute`). `MockLLMClient` yalnızca eski isimleri tanıyordu → canlı webcam akışında hiçbir triaj flag'i tetiklenmeyecekti. Mock güncellendi: hem eski demo vocab'ını hem de yeni live-agent vocab'ını paralel olarak destekliyor (geriye dönük uyumlu).
+
+**Test güncellemeleri:**
+- `gateway_agents/tests/test_runner.py` — Yusuf'un eklediği testler `len(bundle.observations()) == 3` bekliyordu; 4-ajan beklentisine geçirildi, payload kontrolüne `thermal` eklendi.
+- `gateway_agents/tests/test_agents_synthetic.py` (mertmrz'in) Yusuf'un commit'inde silinmiş; `test_agents.py` + `test_runner.py` ile değiştirilmiş. Otomatik merge bunu kabul etti.
+
+**Doğrulama:**
+- `python -m pytest gateway_agents/tests orchestration/tests -v` → **23/23 PASS** (Yusuf'un 12 agent testi + 6 runner testi + 5 supervisor testi).
+- `npx tsc --noEmit` (frontend) → clean.
+- Kalan 12 ruff uyarısı kozmetik (datetime.UTC vs timezone.utc, UP037, vs.) — tamamı pre-existing, bu turun değişikliklerinden değil.
+
+**Git workflow:**
+- Commit zinciri: `22fd6da` (önceki termal) → `9ddf0cd` (bug fix) → `a099d15` (Yusuf ile merge).
+- `mertmrz` → `origin/mertmrz` push edildi (PR #1 güncel sürüme geldi).
+- `main` ← `mertmrz` fast-forward → `origin/main` push edildi (Yusuf'un main'i merge'i içerdi, PR #1 otomatik "merged" işaretlendi).
+- `mertmrz` branch'i hem local hem remote'tan silindi — bundan sonra her yeni iş `main`'den taze feature branch + PR akışıyla yapılacak.
+
+**Açık takipler:**
+- Yusuf'un yeni `SkinAgent`'ı Haar Cascade kullanıyor, termal ajan hâlâ MediaPipe Face Detection'a bağlı. Tutarsız ama her ikisi de çalışıyor; ileride tek yüz tespit mekanizması paylaşılabilir.
+- Yusuf'un `WebcamSource`'unda `cv2.imshow` canlı önizleme açıyor — headless ortamlarda (Docker, CI) problem yaratabilir; gerektiğinde bir `--no-preview` flag'i eklenebilir.
+
 ---
 
 ## Açık kararlar
@@ -166,11 +200,12 @@ python -m uvicorn backend_api.app.main:app --reload --host 127.0.0.1 --port 8000
 cd frontend && npm install && npm run dev
 
 # Gateway runner (terminal 3) — gerçek webcam → backend → dashboard
-python -m gateway_agents.runner --source webcam --window 3.0 --fps 15
-
-# veya kuru deneme (backend'e POST etmeden):
-python -m gateway_agents.runner --source webcam --dry-run
+# CLI 2026-05-13 sonrası: --source/--path yerine --webcam / --video / --mqtt
+python -m gateway_agents.runner --webcam 0 --window 3.0
 
 # veya test videosu üzerinden:
-python -m gateway_agents.runner --source video --path data/demo/red.mp4 --loop
+python -m gateway_agents.runner --video data/demo/red.mp4 --loop
+
+# veya MQTT (ESP32-CAM hazır olduğunda):
+python -m gateway_agents.runner --mqtt
 ```
