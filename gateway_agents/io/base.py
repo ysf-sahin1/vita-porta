@@ -1,23 +1,32 @@
-"""Frame source contract — bir AnalysisWindow toplayıp yield eden iterator."""
+"""Frame source contract — BGR frame'leri tek tek yield eden ABC."""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
+from types import TracebackType
 
-from gateway_agents.agents.base import AnalysisWindow
+import numpy as np
 
 
 class FrameSource(ABC):
-    """Bir source, sürekli olarak `AnalysisWindow` üretir.
-
-    Her window, ajanların analiz edebileceği kısa bir frame penceresidir
-    (örn. 3 saniye / ~45 frame @ 15 fps).
-    """
+    fps: float
 
     @abstractmethod
-    def windows(self) -> Iterator[AnalysisWindow]:
-        """Sonsuz veya sonlu bir window iteratoru döner."""
+    def frames(self) -> Iterator[np.ndarray]:
+        ...
 
-    def close(self) -> None:  # pragma: no cover — opsiyonel kaynak temizliği
-        pass
+    @abstractmethod
+    def close(self) -> None:
+        ...
+
+    def __enter__(self) -> "FrameSource":
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        self.close()

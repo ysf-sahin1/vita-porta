@@ -1,0 +1,19 @@
+{
+  "id": "com.vitaporta.docs-viewer",
+  "name": "Vita Porta Docs Viewer",
+  "version": "0.1.0",
+  "description": "Tüm Vita Porta proje dokümantasyonunu tek, temiz arayüzde görüntüle",
+  "main": "dist/index.js",
+  "apiVersion": "1.0.0",
+  "permissions": {},
+  "contributions": {
+    "panels": [
+      {
+        "id": "vitaporta.docsPanel",
+        "title": "📚 Vita Porta Dokümantasyon",
+        "icon": "book",
+        "component": "DocsPanel"
+      }
+    ]
+  }
+}

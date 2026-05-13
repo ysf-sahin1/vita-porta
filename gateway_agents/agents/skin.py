@@ -1,151 +1,125 @@
-"""Ten rengi ajanı — OpenCV ile HSV/LAB renk uzayında solgunluk analizi.
-
-Strateji:
-    1. MediaPipe Face Detection ile yüz bölgesini bul (yoksa frame ortası ROI).
-    2. ROI'yi HSV ve LAB'a çevir.
-    3. Solgunluk = düşük saturation (HSV.S) + düşük redness (LAB.a).
-    4. Birden fazla frame'in ortalamasını al → gürültüye dayanıklı.
-
-Çıktı sinyalleri:
-    pallor_score      0..1   — 1 = belirgin solgun, 0 = normal
-    saturation_mean   0..255 — ortalama doygunluk
-    redness_mean      0..255 — LAB.a kanalı ortalaması (128 = nötr)
-    face_detected     bool   — yüz tespit edildi mi
-"""
+"""Ten rengi ajanı — Haar Cascade yüz tespiti + HSV ortalaması ile solgunluk."""
 
 from __future__ import annotations
 
-import logging
+import os
 
+import cv2
 import numpy as np
 
 from gateway_agents.agents.base import Agent, AnalysisWindow
 from orchestration.schemas import AgentObservation
 
-logger = logging.getLogger(__name__)
 
-try:
-    import cv2
-
-    _CV_AVAILABLE = True
-except ImportError:
-    cv2 = None  # type: ignore[assignment]
-    _CV_AVAILABLE = False
-
-try:
-    import mediapipe as mp
-
-    _MP_AVAILABLE = True
-except ImportError:
-    mp = None  # type: ignore[assignment]
-    _MP_AVAILABLE = False
-
-
-# Solgunluk eşikleri: standart aydınlatmada kalibre edilmiş kaba değerler.
-# Pilot aşamasında kapı altı ışıklandırmasıyla yeniden kalibre edilmeli.
-_SAT_NORMAL = 80.0  # HSV.S — bunun altı solgun yönünde
-_RED_NORMAL = 138.0  # LAB.a — 128 nötr, sağlıklı ten ~140+
+# Standart ofis aydınlatmasında kalibre: doygunluk düşük + parlaklık yüksek →
+# kan dolaşımı azalmış soluk yüz örüntüsü. Hackathon kalibrasyonu; klinik değil.
+_SAT_PALE_MAX = 80.0
+_VAL_PALE_MIN = 120.0
+_DIM_BRIGHTNESS = 60.0
+_SAMPLE_COUNT = 5
 
 
 class SkinAgent(Agent):
     name = "skin"
 
     def __init__(self) -> None:
-        if not _CV_AVAILABLE:
-            raise RuntimeError("opencv-python yüklü değil.")
-        self._face = None
-        if _MP_AVAILABLE:
-            self._face = mp.solutions.face_detection.FaceDetection(
-                model_selection=0, min_detection_confidence=0.5
-            )
+        cascade_path = os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
+        if not os.path.exists(cascade_path):
+            raise RuntimeError(f"Haar cascade dosyası bulunamadı: {cascade_path}")
+        self._face_cascade = cv2.CascadeClassifier(cascade_path)
+        if self._face_cascade.empty():
+            raise RuntimeError("Haar cascade yüklenemedi.")
 
     def analyze(self, window: AnalysisWindow) -> AgentObservation:
-        if not window.frames:
-            return _insufficient("Görüntü alınamadı.")
+        frames = window.frames
+        if not frames:
+            return _insufficient()
 
+        samples = _sample_frames(frames, _SAMPLE_COUNT)
         sat_means: list[float] = []
-        red_means: list[float] = []
+        val_means: list[float] = []
+        sat_stds: list[float] = []
         face_hits = 0
 
-        for frame in window.frames:
-            roi, has_face = self._extract_face_roi(frame)
-            if has_face:
-                face_hits += 1
-            if roi is None or roi.size == 0:
+        for frame in samples:
+            if frame is None or frame.ndim != 3:
+                continue
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            faces = self._face_cascade.detectMultiScale(
+                gray, scaleFactor=1.2, minNeighbors=5, minSize=(60, 60)
+            )
+            if len(faces) == 0:
+                continue
+            face_hits += 1
+            x, y, w, h = max(faces, key=lambda r: r[2] * r[3])
+            roi = frame[y : y + h, x : x + w]
+            if roi.size == 0:
                 continue
             hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-            lab = cv2.cvtColor(roi, cv2.COLOR_BGR2LAB)
             sat_means.append(float(np.mean(hsv[:, :, 1])))
-            red_means.append(float(np.mean(lab[:, :, 1])))
+            val_means.append(float(np.mean(hsv[:, :, 2])))
+            sat_stds.append(float(np.std(hsv[:, :, 1])))
+
+        sampled = len(samples)
+        face_ratio = face_hits / sampled if sampled else 0.0
 
         if not sat_means:
-            return _insufficient("ROI çıkarılamadı.")
+            return AgentObservation(
+                agent="skin",
+                confidence=0.0,
+                summary_tr="Görsel veri yetersiz",
+                signals={},
+            )
 
-        sat_mean = float(np.mean(sat_means))
-        red_mean = float(np.mean(red_means))
+        mean_sat = float(np.mean(sat_means))
+        mean_val = float(np.mean(val_means))
+        color_variance = float(np.mean(sat_stds))
 
-        # Pallor: düşük saturation + düşük redness → yüksek skor
-        sat_pallor = max(0.0, (_SAT_NORMAL - sat_mean) / _SAT_NORMAL)
-        red_pallor = max(0.0, (_RED_NORMAL - red_mean) / 10.0)
-        pallor_score = float(min(1.0, 0.6 * sat_pallor + 0.4 * red_pallor))
+        if mean_sat < _SAT_PALE_MAX and mean_val > _VAL_PALE_MIN:
+            skin_tone = "solgun"
+        elif mean_val < _DIM_BRIGHTNESS:
+            skin_tone = "belirsiz"
+        else:
+            skin_tone = "normal"
 
-        face_ratio = face_hits / len(window.frames)
-        confidence = float(min(1.0, 0.4 + 0.6 * face_ratio))
-
-        summary_tr = _build_summary(pallor_score, face_ratio > 0)
+        confidence = float(np.clip(face_ratio, 0.0, 1.0))
+        # Loş ortamda renk ölçümü güvenilmez; üst sınırı düşür.
+        if mean_val < _DIM_BRIGHTNESS:
+            confidence = min(confidence, 0.5)
 
         return AgentObservation(
             agent="skin",
             confidence=confidence,
-            summary_tr=summary_tr,
+            summary_tr=_summary(skin_tone),
             signals={
-                "pallor_score": round(pallor_score, 3),
-                "saturation_mean": round(sat_mean, 1),
-                "redness_mean": round(red_mean, 1),
-                "face_detected": face_ratio > 0,
+                "skin_tone": skin_tone,
+                "color_variance": round(color_variance, 3),
+                "mean_saturation": round(mean_sat, 2),
+                "face_detected_ratio": round(face_ratio, 3),
             },
         )
 
-    def _extract_face_roi(self, frame: np.ndarray) -> tuple[np.ndarray | None, bool]:
-        h, w = frame.shape[:2]
-        if self._face is not None:
-            rgb = frame[:, :, ::-1]
-            result = self._face.process(rgb)
-            if result.detections:
-                box = result.detections[0].location_data.relative_bounding_box
-                x = max(0, int(box.xmin * w))
-                y = max(0, int(box.ymin * h))
-                bw = max(1, int(box.width * w))
-                bh = max(1, int(box.height * h))
-                roi = frame[y : y + bh, x : x + bw]
-                return roi, True
-        # Fallback: orta-üst dikdörtgen ROI (yüz olası bölgesi)
-        cy0 = int(h * 0.15)
-        cy1 = int(h * 0.55)
-        cx0 = int(w * 0.30)
-        cx1 = int(w * 0.70)
-        return frame[cy0:cy1, cx0:cx1], False
 
-    def close(self) -> None:
-        if self._face is not None:
-            self._face.close()
+def _sample_frames(frames: list[np.ndarray], count: int) -> list[np.ndarray]:
+    n = len(frames)
+    if n <= count:
+        return list(frames)
+    step = n / float(count)
+    return [frames[int(i * step)] for i in range(count)]
 
 
-def _build_summary(pallor: float, face_seen: bool) -> str:
-    if pallor > 0.6:
-        head = "Ten rengi belirgin solgun"
-    elif pallor > 0.3:
-        head = "Hafif solgunluk"
-    else:
-        head = "Ten rengi normal"
-    tail = " (yüz tespit edildi)" if face_seen else " (yüz tespit edilemedi, ROI fallback)"
-    return head + tail + "."
+def _summary(skin_tone: str) -> str:
+    if skin_tone == "solgun":
+        return "Cilt tonu solgun, dolaşım/oksijenizasyon değerlendirmesi önerilir."
+    if skin_tone == "belirsiz":
+        return "Ortam ışığı düşük, cilt tonu güvenilir değerlendirilemedi."
+    return "Cilt tonu normal sınırlarda."
 
 
-def _insufficient(reason: str) -> AgentObservation:
+def _insufficient() -> AgentObservation:
     return AgentObservation(
         agent="skin",
         confidence=0.0,
-        summary_tr=f"Ten rengi verisi yetersiz: {reason}",
-        signals={"pallor_score": 0.0, "face_detected": False},
+        summary_tr="Görsel veri yetersiz",
+        signals={},
     )

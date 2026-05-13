@@ -1,159 +1,134 @@
-"""Solunum ajanı — basitleştirilmiş frame-fark analizi.
-
-NotebookLM hackathon önerisi: tam optik akış yerine frame-fark eşiklemesi ile
-göğüs hareket örüntüsünü çıkarmak yeterli. Tam optik akış sonraki sprint.
-
-Strateji:
-    1. Göğüs ROI'sini frame'in alt-orta bölgesinden al (kapı çerçevesi kamerası
-       hastayı dik konumda görür; pose tabanlı ROI Faz-6'da gelir).
-    2. Ardışık frame'ler arasında grayscale fark (mutlak değer ortalaması).
-    3. Fark sinyalinden tepe sayısı → solunum frekansı (BPM tahmini).
-    4. Sinyal varyansı çok düşükse "apne benzeri", çok yüksekse "hızlı/düzensiz".
-
-Çıktı sinyalleri:
-    breath_per_minute  float  — kaba BPM tahmini
-    motion_score       0..1   — toplam hareket yoğunluğu
-    pattern            str    — "normal" | "hızlı" | "yavaş" | "düzensiz" | "apne_riski"
-"""
+"""Solunum ajanı — sabit göğüs ROI üzerinde frame-fark tabanlı BPM tahmini."""
 
 from __future__ import annotations
 
-import logging
-
+import cv2
 import numpy as np
 
 from gateway_agents.agents.base import Agent, AnalysisWindow
 from orchestration.schemas import AgentObservation
 
-logger = logging.getLogger(__name__)
 
-try:
-    import cv2
-
-    _CV_AVAILABLE = True
-except ImportError:
-    cv2 = None  # type: ignore[assignment]
-    _CV_AVAILABLE = False
-
-
-# Erişkin normal: 12–20 nefes/dk. Sınırlar:
-_BPM_NORMAL_LOW = 12.0
-_BPM_NORMAL_HIGH = 20.0
-_BPM_FAST_HIGH = 30.0
+_DIFF_THRESHOLD = 25
+_BPM_SLOW_MAX = 10.0
+_BPM_FAST_MIN = 22.0
+# Walking/large-body motion penceresinde CV (std/mean) > 1.0 olur; nefes daha
+# stabildir. Bu üstü erratik kabul edilip güven düşürülür.
+_ERRATIC_CV_THRESHOLD = 1.0
+# Tepe için medyan çarpanı; çok düşük bırakılırsa gürültü tepesi sayılır.
+_PEAK_MEDIAN_FACTOR = 1.2
 
 
 class RespirationAgent(Agent):
     name = "respiration"
 
-    def __init__(self) -> None:
-        if not _CV_AVAILABLE:
-            raise RuntimeError("opencv-python yüklü değil.")
-
     def analyze(self, window: AnalysisWindow) -> AgentObservation:
         frames = window.frames
-        if len(frames) < 4:
-            return _insufficient("Solunum analizi için yeterli frame yok (en az 4).")
-        if window.fps <= 0:
-            return _insufficient("Geçersiz fps.")
+        if not frames or window.fps <= 0:
+            return _insufficient()
 
-        diffs: list[float] = []
+        min_required = max(2, int(window.fps * 1.0))
+        if len(frames) < min_required:
+            return _insufficient()
+
+        motion_series: list[float] = []
         prev_gray = None
         for frame in frames:
+            if frame is None or frame.ndim != 3:
+                continue
             roi = _chest_roi(frame)
             gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
             if prev_gray is not None and gray.shape == prev_gray.shape:
-                diff = float(np.mean(cv2.absdiff(gray, prev_gray)))
-                diffs.append(diff)
+                diff = cv2.absdiff(gray, prev_gray)
+                _, mask = cv2.threshold(diff, _DIFF_THRESHOLD, 255, cv2.THRESH_BINARY)
+                motion_series.append(float(np.sum(mask) / 255.0))
             prev_gray = gray
 
-        if not diffs:
-            return _insufficient("Frame farkı hesaplanamadı.")
+        if len(motion_series) < 3:
+            return _insufficient()
 
-        signal = np.array(diffs, dtype=np.float32)
+        signal = _smooth(np.asarray(motion_series, dtype=np.float32))
+        median = float(np.median(signal))
+        peak_indices = _find_peaks(signal, median * _PEAK_MEDIAN_FACTOR)
 
-        # Tepe sayısı: sinyal ortalamasının üstünden geçen yükselen kenarlar
-        mean = float(signal.mean())
-        std = float(signal.std())
-        threshold = mean + 0.3 * std
-        peaks = 0
-        above = False
-        for v in signal:
-            if v > threshold and not above:
-                peaks += 1
-                above = True
-            elif v <= threshold:
-                above = False
+        duration_s = window.duration_s
+        if duration_s <= 0.5:
+            return _insufficient()
 
-        # Pencere süresi (saniye)
-        duration_s = len(frames) / window.fps
-        if duration_s <= 0.1:
-            return _insufficient("Çok kısa analiz penceresi.")
-        bpm = peaks * (60.0 / duration_s)
+        bpm = (len(peak_indices) / duration_s) * 60.0
+        movement_intensity = float(np.mean(signal))
+        mean_for_cv = max(movement_intensity, 1e-6)
+        cv_ratio = float(np.std(signal) / mean_for_cv)
 
-        motion_score = float(min(1.0, mean / 8.0))  # 8 BGR gri-fark birimi = belirgin
-        pattern = _classify(bpm, std, motion_score)
+        pattern = _classify(bpm, peak_indices, cv_ratio)
 
-        # Güven: hareket çok düşükse veya frame sayısı azsa düşer
-        confidence = float(min(1.0, 0.3 + 0.7 * motion_score))
-        if pattern == "apne_riski":
-            confidence *= 0.7  # düşük hareketle BPM güvenilmez
-
-        summary_tr = _build_summary(bpm, pattern)
+        confidence = 0.7
+        if cv_ratio > _ERRATIC_CV_THRESHOLD:
+            confidence = 0.2
 
         return AgentObservation(
             agent="respiration",
             confidence=confidence,
-            summary_tr=summary_tr,
+            summary_tr=_summary(pattern, bpm),
             signals={
-                "breath_per_minute": round(bpm, 1),
-                "motion_score": round(motion_score, 3),
-                "pattern": pattern,
+                "breathing_pattern": pattern,
+                "breaths_per_minute": round(bpm, 1),
+                "movement_intensity": round(movement_intensity, 2),
             },
         )
 
 
 def _chest_roi(frame: np.ndarray) -> np.ndarray:
-    """Frame'in alt-orta dikdörtgenini göğüs ROI olarak al."""
     h, w = frame.shape[:2]
-    y0 = int(h * 0.45)
-    y1 = int(h * 0.85)
-    x0 = int(w * 0.25)
-    x1 = int(w * 0.75)
+    x0 = int(w * 0.30)
+    x1 = int(w * 0.70)
+    y0 = int(h * 0.30)
+    y1 = int(h * 0.60)
     return frame[y0:y1, x0:x1]
 
 
-def _classify(bpm: float, std: float, motion: float) -> str:
-    if motion < 0.05:
-        return "apne_riski"
-    if std / max(0.01, motion * 8.0) > 1.5:
-        return "düzensiz"
-    if bpm > _BPM_FAST_HIGH:
-        return "hızlı"
-    if bpm < _BPM_NORMAL_LOW:
+def _smooth(signal: np.ndarray, k: int = 3) -> np.ndarray:
+    if signal.size < k:
+        return signal
+    kernel = np.ones(k, dtype=np.float32) / k
+    return np.convolve(signal, kernel, mode="same")
+
+
+def _find_peaks(signal: np.ndarray, min_height: float) -> list[int]:
+    peaks: list[int] = []
+    for i in range(1, len(signal) - 1):
+        if signal[i] > signal[i - 1] and signal[i] > signal[i + 1] and signal[i] > min_height:
+            peaks.append(i)
+    return peaks
+
+
+def _classify(bpm: float, peak_indices: list[int], cv_ratio: float) -> str:
+    if len(peak_indices) >= 3:
+        intervals = np.diff(peak_indices)
+        if intervals.size > 1 and np.std(intervals) / max(np.mean(intervals), 1e-6) > 0.5:
+            return "düzensiz"
+    if bpm < _BPM_SLOW_MAX:
         return "yavaş"
-    if bpm <= _BPM_NORMAL_HIGH:
-        return "normal"
-    return "hızlı"
+    if bpm > _BPM_FAST_MIN:
+        return "hızlı"
+    return "normal"
 
 
-def _build_summary(bpm: float, pattern: str) -> str:
+def _summary(pattern: str, bpm: float) -> str:
     bpm_txt = f"{bpm:.0f} nefes/dk"
-    if pattern == "apne_riski":
-        # Hareket yokken BPM gürültüye dayalı; göstermek yanıltıcı olur.
-        return "Solunum: belirgin göğüs hareketi yok, apne riski."
-    if pattern == "düzensiz":
-        return f"Solunum: düzensiz örüntü ({bpm_txt})."
-    if pattern == "hızlı":
-        return f"Solunum: hızlanmış ({bpm_txt})."
     if pattern == "yavaş":
-        return f"Solunum: yavaşlamış ({bpm_txt})."
-    return f"Solunum: normal hızda ({bpm_txt})."
+        return f"Solunum yavaşlamış ({bpm_txt}), bilinç ve oksijen kontrolü önerilir."
+    if pattern == "hızlı":
+        return f"Solunum hızlanmış ({bpm_txt}), takipne açısından değerlendirilmeli."
+    if pattern == "düzensiz":
+        return f"Solunum örüntüsü düzensiz ({bpm_txt}), dikkatli izlem gerekli."
+    return f"Solunum normal aralıkta ({bpm_txt})."
 
 
-def _insufficient(reason: str) -> AgentObservation:
+def _insufficient() -> AgentObservation:
     return AgentObservation(
         agent="respiration",
         confidence=0.0,
-        summary_tr=f"Solunum verisi yetersiz: {reason}",
-        signals={"breath_per_minute": 0.0, "motion_score": 0.0, "pattern": "yetersiz"},
+        summary_tr="Görsel veri yetersiz",
+        signals={},
     )
