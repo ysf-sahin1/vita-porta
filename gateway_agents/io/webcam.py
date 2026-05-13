@@ -36,9 +36,9 @@ class WebcamSource(FrameSource):
     def _open(self) -> cv2.VideoCapture:
         if self._cap is not None and self._cap.isOpened():
             return self._cap
-        cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
-        if not cap.isOpened():
-            cap = cv2.VideoCapture(self.camera_index)
+        if self._cap is not None:
+            self._cap.release()
+        cap = cv2.VideoCapture(self.camera_index)
         if not cap.isOpened():
             raise RuntimeError(f"Webcam açılamadı (index={self.camera_index}).")
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
@@ -49,22 +49,40 @@ class WebcamSource(FrameSource):
         return cap
 
     def windows(self) -> Iterator[AnalysisWindow]:
-        cap = self._open()
         frames_per_window = max(2, int(self.target_fps * self.window_seconds))
         frame_interval = 1.0 / self.target_fps
+        consecutive_failures = 0
         while True:
+            try:
+                cap = self._open()
+            except RuntimeError as exc:
+                logger.error("Webcam açılamadı: %s — 2sn sonra tekrar deneniyor.", exc)
+                time.sleep(2.0)
+                self._cap = None
+                continue
+
             frames = []
             t_start = time.perf_counter()
             for _ in range(frames_per_window):
                 ok, frame = cap.read()
                 if not ok or frame is None:
-                    logger.warning("Webcam frame okunamadı, kaynak kapanmış olabilir.")
-                    return
+                    consecutive_failures += 1
+                    logger.warning(
+                        "Webcam frame okunamadı (%d. ardışık hata), yeniden bağlanılıyor.",
+                        consecutive_failures,
+                    )
+                    self._cap = None
+                    break
                 frames.append(frame)
-                # Basit hız sınırlandırma
                 elapsed = time.perf_counter() - t_start - len(frames) * frame_interval
                 if elapsed < 0:
                     time.sleep(min(0.05, -elapsed))
+
+            if not frames:
+                time.sleep(0.5)
+                continue
+
+            consecutive_failures = 0
             t_end = time.perf_counter()
             actual_fps = len(frames) / max(0.001, t_end - t_start)
             yield AnalysisWindow(frames=frames, fps=actual_fps)

@@ -73,7 +73,7 @@ class MockLLMClient(LLMClient):
         by_agent: dict[str, dict] = {o["agent"]: o for o in observations}
         weights = {
             name: (by_agent[name]["confidence"] if name in by_agent else 0.0)
-            for name in ("gait", "skin", "respiration")
+            for name in ("gait", "skin", "respiration", "thermal")
         }
 
         red_flags = 0
@@ -83,35 +83,61 @@ class MockLLMClient(LLMClient):
         skin = by_agent.get("skin")
         if skin and skin["confidence"] >= 0.5:
             signals = skin.get("signals", {})
-            if signals.get("pallor") is True or signals.get("severity") == "high":
+            pallor_score = float(signals.get("pallor_score", 0))
+            if signals.get("pallor") is True or signals.get("severity") == "high" or pallor_score >= 0.6:
                 red_flags += 1
                 rationale_parts.append(
                     f"Ten rengi ajanı %{int(skin['confidence']*100)} güvenle solgunluk tespit etti"
                 )
-            elif signals.get("severity") == "mild":
+            elif signals.get("severity") == "mild" or pallor_score >= 0.3:
                 yellow_flags += 1
                 rationale_parts.append("Ten rengi ajanı hafif solgunluk tespit etti")
 
         resp = by_agent.get("respiration")
         if resp and resp["confidence"] >= 0.5:
             signals = resp.get("signals", {})
-            rate = float(signals.get("rate_bpm", 0))
-            if rate >= 24 or signals.get("severity") == "high":
+            rate = float(signals.get("rate_bpm", 0) or signals.get("breath_per_minute", 0))
+            pattern = signals.get("pattern", "")
+            if rate >= 24 or signals.get("severity") == "high" or pattern in ("hızlı", "apne_riski"):
                 red_flags += 1
                 rationale_parts.append(
-                    f"solunum ajanı %{int(resp['confidence']*100)} güvenle hızlı solunum bildirdi"
+                    f"solunum ajanı %{int(resp['confidence']*100)} güvenle anormal solunum bildirdi"
                 )
-            elif rate >= 20 or signals.get("severity") == "mild":
+            elif rate >= 20 or signals.get("severity") == "mild" or pattern in ("yavaş", "düzensiz"):
                 yellow_flags += 1
-                rationale_parts.append("solunum ajanı hafif hızlanma bildirdi")
+                rationale_parts.append("solunum ajanı hafif anormallik bildirdi")
 
         gait = by_agent.get("gait")
         if gait and gait["confidence"] >= 0.5:
             signals = gait.get("signals", {})
-            if signals.get("sway") is True or signals.get("severity") == "high":
+            sway_score = float(signals.get("sway_score", 0))
+            if signals.get("sway") is True or signals.get("severity") == "high" or sway_score >= 0.6:
                 yellow_flags += 1
                 rationale_parts.append(
                     f"yürüyüş ajanı %{int(gait['confidence']*100)} güvenle sallantılı yürüyüş tespit etti"
+                )
+
+        # Termal ajan: proxy modunda destekleyici sinyal, tek başına kırmızıya çekmez.
+        thermal = by_agent.get("thermal")
+        if thermal and thermal["confidence"] >= 0.4:
+            signals = thermal.get("signals", {})
+            temp_c = float(signals.get("temp_estimate_c", 36.5))
+            is_proxy = signals.get("sensor_type") == "rgb_proxy"
+            if signals.get("hypothermia_flag") is True:
+                # Hipotermi + başka anormallik birleşince kırmızı; tek başına sarı.
+                if red_flags >= 1 or yellow_flags >= 1:
+                    red_flags += 1
+                else:
+                    yellow_flags += 1
+                rationale_parts.append(
+                    f"termal ajan düşük sıcaklık şüphesi bildirdi (~{temp_c}°C)"
+                )
+            elif signals.get("fever_flag") is True:
+                # Proxy modunda ateş tek başına sarı kabul edilir.
+                yellow_flags += 1
+                proxy_note = " [RGB proxy]" if is_proxy else ""
+                rationale_parts.append(
+                    f"termal ajan ateş şüphesi bildirdi (~{temp_c}°C){proxy_note}"
                 )
 
         for name in missing:

@@ -36,7 +36,7 @@ class AgentObservation(BaseModel):
     card; signals carry the machine-readable details the supervisor reasons over.
     """
 
-    agent: Literal["gait", "skin", "respiration"]
+    agent: Literal["gait", "skin", "respiration", "thermal"]
     confidence: float = Field(ge=0.0, le=1.0)
     summary_tr: str = Field(description="Hemşireye gösterilecek tek cümlelik Türkçe gözlem")
     signals: dict[str, float | str | bool] = Field(default_factory=dict)
@@ -57,10 +57,11 @@ class AgentBundle(BaseModel):
     gait: AgentObservation | None = None
     skin: AgentObservation | None = None
     respiration: AgentObservation | None = None
+    thermal: AgentObservation | None = None
     captured_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     def observations(self) -> list[AgentObservation]:
-        return [obs for obs in (self.gait, self.skin, self.respiration) if obs is not None]
+        return [obs for obs in (self.gait, self.skin, self.respiration, self.thermal) if obs is not None]
 
 
 class TriageDecision(BaseModel):

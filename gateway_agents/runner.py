@@ -24,6 +24,7 @@ from gateway_agents.agents import (
     GaitAgent,
     RespirationAgent,
     SkinAgent,
+    ThermalAgent,
 )
 from gateway_agents.io import FrameSource, VideoFileSource, WebcamSource
 from orchestration.schemas import AgentBundle, AgentObservation
@@ -41,11 +42,12 @@ class GatewayRunner:
         self.source = source
         self.backend_url = backend_url.rstrip("/")
         self.dry_run = dry_run
-        self._executor = ThreadPoolExecutor(max_workers=3)
+        self._executor = ThreadPoolExecutor(max_workers=4)
         # Ajanları lazily yarat — webcam yokken bile import edilebilsin diye burada
         self._gait = GaitAgent()
         self._skin = SkinAgent()
         self._respiration = RespirationAgent()
+        self._thermal = ThermalAgent()
 
     async def run(self) -> None:
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -76,28 +78,31 @@ class GatewayRunner:
 
     async def _analyze_window(self, window: AnalysisWindow) -> AgentBundle:
         loop = asyncio.get_running_loop()
-        # 3 ajanı paralel çalıştır — CPU-bound olduğu için thread pool yeterli
+        # 4 ajanı paralel çalıştır — CPU-bound olduğu için thread pool yeterli
         gait_fut = loop.run_in_executor(self._executor, self._gait.analyze, window)
         skin_fut = loop.run_in_executor(self._executor, self._skin.analyze, window)
         resp_fut = loop.run_in_executor(self._executor, self._respiration.analyze, window)
-        gait_obs, skin_obs, resp_obs = await asyncio.gather(gait_fut, skin_fut, resp_fut)
-        return _build_bundle(gait_obs, skin_obs, resp_obs)
+        thermal_fut = loop.run_in_executor(self._executor, self._thermal.analyze, window)
+        gait_obs, skin_obs, resp_obs, thermal_obs = await asyncio.gather(
+            gait_fut, skin_fut, resp_fut, thermal_fut
+        )
+        return _build_bundle(gait_obs, skin_obs, resp_obs, thermal_obs)
 
     def close(self) -> None:
         self._executor.shutdown(wait=False)
         self.source.close()
-        if hasattr(self._gait, "close"):
-            self._gait.close()
-        if hasattr(self._skin, "close"):
-            self._skin.close()
+        for agent in (self._gait, self._skin, self._respiration, self._thermal):
+            if hasattr(agent, "close"):
+                agent.close()
 
 
 def _build_bundle(
     gait: AgentObservation,
     skin: AgentObservation,
     respiration: AgentObservation,
+    thermal: AgentObservation,
 ) -> AgentBundle:
-    return AgentBundle(gait=gait, skin=skin, respiration=respiration)
+    return AgentBundle(gait=gait, skin=skin, respiration=respiration, thermal=thermal)
 
 
 def _make_source(args: argparse.Namespace) -> FrameSource:

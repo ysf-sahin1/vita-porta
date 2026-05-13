@@ -2,9 +2,9 @@
 
 import { cn } from "@/lib/cn";
 import type { AgentObservation } from "@/lib/types";
-import { Activity, Droplets, Footprints } from "lucide-react";
+import { Activity, Droplets, Footprints, Thermometer } from "lucide-react";
 
-type Agent = "gait" | "skin" | "respiration";
+type Agent = "gait" | "skin" | "respiration" | "thermal";
 
 const AGENT_META: Record<
   Agent,
@@ -13,6 +13,7 @@ const AGENT_META: Record<
   gait: { label: "Yürüyüş Ajanı", Icon: Footprints, color: "text-indigo-600", bg: "bg-indigo-50" },
   skin: { label: "Ten Rengi Ajanı", Icon: Droplets, color: "text-rose-600", bg: "bg-rose-50" },
   respiration: { label: "Solunum Ajanı", Icon: Activity, color: "text-sky-600", bg: "bg-sky-50" },
+  thermal: { label: "Termal Ajan", Icon: Thermometer, color: "text-orange-600", bg: "bg-orange-50" },
 };
 
 export function AgentPanel({
@@ -21,7 +22,7 @@ export function AgentPanel({
   observations: Partial<Record<Agent, AgentObservation>>;
 }) {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
       {(Object.keys(AGENT_META) as Agent[]).map((agent) => (
         <AgentCard key={agent} agent={agent} obs={observations[agent]} />
       ))}
