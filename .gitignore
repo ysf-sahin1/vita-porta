@@ -17,6 +17,8 @@ node_modules/
 .next/
 out/
 dist/
+*.tsbuildinfo
+/package-lock.json
 
 # Logs
 *.log

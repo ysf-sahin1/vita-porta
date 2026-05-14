@@ -2,7 +2,7 @@
 
 Bu dosya geliştirme oturumlarının kaldığı yerden devam edebilmesi için tutulur. Her faz: durum, neyin tamamlandığı, neyin kaldığı, ilgili dosyalar ve doğrulama yöntemi.
 
-**Genel durum:** 7.5/8 faz tamamlandı. Sistem **gerçek webcam'den canlı çalışıyor**: 4 görsel ajan (yürüyüş, ten rengi, solunum, termal) paralel işliyor, supervisor karar üretiyor, dashboard SSE ile yayınlıyor. **mertmrz branch'i ile origin/main (Yusuf'un Phase 5 rewrite'ı) birleştirildi ve tüm değişiklikler ana projeye (ysf-sahin1/vita-porta) push'landı** (2026-05-13). Kalan: edge firmware + Docker compose (Faz 6) ve pitch polish (Faz 8).
+**Genel durum:** 7.5/8 faz tamamlandı + **Faz 4.5 (Frontend yenileme)** tamamlandı. Sistem **gerçek webcam'den canlı çalışıyor**: 4 görsel ajan (yürüyüş, ten rengi, solunum, termal) paralel işliyor, supervisor karar üretiyor, dashboard SSE ile yayınlıyor. Frontend Health-OS stilinde komple yenilendi (`frontend-yenileme` branch, 2026-05-14): Inter font, glassmorphism, hemşire onay/red/değiştir akışı, history detay modal'ı, Türkçe sinyal etiketleri. **mertmrz branch'i ile origin/main (Yusuf'un Phase 5 rewrite'ı) birleştirildi ve tüm değişiklikler ana projeye (ysf-sahin1/vita-porta) push'landı** (2026-05-13). Kalan: edge firmware + Docker compose (Faz 6) ve pitch polish (Faz 8).
 
 **NotebookLM bağlantısı:** Notebook ID `d9854800-b703-4b71-919f-6121bb3e05d8`. Proje bağlamı her oturumda NotebookLM'den çekilir.
 
@@ -174,6 +174,120 @@ Bu dosya geliştirme oturumlarının kaldığı yerden devam edebilmesi için tu
 - Yusuf'un yeni `SkinAgent`'ı Haar Cascade kullanıyor, termal ajan hâlâ MediaPipe Face Detection'a bağlı. Tutarsız ama her ikisi de çalışıyor; ileride tek yüz tespit mekanizması paylaşılabilir.
 - Yusuf'un `WebcamSource`'unda `cv2.imshow` canlı önizleme açıyor — headless ortamlarda (Docker, CI) problem yaratabilir; gerektiğinde bir `--no-preview` flag'i eklenebilir.
 
+## Faz 4.5 — Frontend Yenileme (Health-OS Redesign) · ✅ Tamamlandı (2026-05-14)
+
+**Bağlam:** `frontend-yenileme` branch'inde Next.js dashboard'u komple yenilendi. Tasarım yönü kullanıcı tarafından "Health-OS / Apple Health benzeri" seçildi (3 alternatif arasından). Hedefler: hemşire için göz yormayan glassmorphism, gerçek zamanlı saat damgaları, Güven/Ağırlık ayrımı, hemşire onay akışı, Türkçe sinyaller, geçmiş detay görünümü, cross-platform tutarlılık.
+
+**Tasarım sistemi (token'lar):**
+- **Font:** Inter, `next/font/google` ile self-host'lu (Google CDN'e prod bağımlılığı yok, GDPR uyumlu, macOS/Windows/Linux'ta birebir aynı render).
+- **Base size:** 14px → **16px** (hemşirenin 1m uzaktan okuyabilmesi için).
+- **Zemin:** Radial cyan + emerald accent + linear `slate-50 → white → blue-50/30` gradient.
+- **Kart yüzeyleri:** `bg-white/70 backdrop-blur-xl border-white/60 shadow-glass` (glassmorphism).
+- **Köşeler:** ana kart `rounded-3xl`, alt kart `rounded-2xl`, etiket `rounded-full`.
+- **Renkler:** mevcut `triage.red/yellow/green/gray` korundu; `redSoft/yellowSoft/greenSoft` soft tonlar eklendi; `status.live/warn/off` (emerald/amber/slate) eklendi.
+- **Animasyonlar:** `pulseRing` (kırmızı), `statusGlow` (yeşil canlı pili), CSS `wobble` (postür sallantı), Tooltip fade-up.
+- **Tabular-nums:** `font-variant-numeric: tabular-nums` utility — saatler/yüzdeler dikey hizalı kalsın.
+
+**Layout:**
+- `max-w-5xl` (1024px) → **`max-w-[1400px]`** wide-screen kullanımı.
+- Wide breakpoint'te 2-kolon grid: sol `1fr` (triage + ajanlar), sağ `380px` (history timeline).
+- Demo butonları üstten alta `<details>` collapse'a indi; gerçek hasta verisi geldiğinde (`patient_id` "demo-" ile başlamıyorsa) hiç render edilmiyor.
+
+**Yeni komponentler:**
+- `Header.tsx` (rewrite) — `text-3xl` başlık, gradient logo badge, 3 status pili (Kamera / API / LLM) + canlı saat. Kamera durumu son gözlem yaşından, LLM durumu son karar latency'sinden (>100ms gerçek, ≤100ms mock) çıkarılır.
+- `Tooltip.tsx` (yeni) — sıfır bağımlılık, CSS hover + focus-within, Info ikonu default, `align="left|center|right"`. Tüm tooltip'ler glassmorphism slate-900/95 koyu kart.
+- `PostureSilhouette.tsx` (yeni) — inline SVG çöp adam, 5 durum: dik / sallantılı (CSS wobble animasyonu) / asimetrik (omuz kayık) / öne eğik / bilinmiyor (dashed). Hem canlı schema (`sway_detected`, `symmetry_status`) hem demo schema (`sway`, `symmetry: float`) tanır.
+- `NurseVerdict.tsx` (yeni) — Onayla (emerald) / Reddet (rose) / Değiştir (white) butonları + inline kategori dropdown'u + verdict banner + ChromaDB italic notu. `Verdict` tipi, `verdictIcon/verdictColorClass/formatVerdictTime` yardımcıları export.
+- `HistoryDetailModal.tsx` (yeni) — backdrop blur + glassmorphism kart, kategori başlığı + saat + gerekçe + 4 ajan kompakt snapshot (Türkçe sinyaller) + NurseVerdict reuse. Escape / backdrop click / X ile kapanır, body scroll lock.
+
+**Yeni lib helpers:**
+- `lib/agentReasons.ts` — `inferAgentReason(obs)` ajanın signals + confidence'ından somut sebep çıkarır:
+  - skin: `skin_tone="belirsiz"` → "Ortam ışığı yetersiz"; `face_detected_ratio < 0.3` → "Yüz net tespit edilemedi"
+  - gait: `avg_visibility < 0.4` → "Vücut tam görünmüyor"
+  - respiration: `movement_intensity < 0.5` → "Göğüs hareketi çok zayıf"
+  - thermal: `sensor_type="rgb_proxy"` → her zaman info pill ("RGB proxy modu")
+  - Severity: `info` (mavi), `warn` (amber), `error` (rose) renkli pill'ler
+- `lib/signalLabels.ts` — `formatSignal(key, value)` ile tüm bilinen ajan sinyalleri Türkçeleştirildi:
+  - Bool → "Var/Yok" (pallor, sway, fever_flag, hypothermia_flag)
+  - String enum → "Solgun/Normal/Belirsiz", "Anormal/Normal", "Hızlı/Yavaş/Düzensiz/Apne Riski", "Yüksek/Hafif/Yok", "RGB Proxy/Termal"
+  - Numerik → birimle: "Sıcaklık: 38.8°C", "Solunum Hızı: 28/dk", "Yüz Tespiti: %75"
+  - Hem canlı schema hem demo schema anahtarları tanınır; bilinmeyen anahtar gizlenir (raw `key:value` gösterilmez).
+
+**Komponent güncellemeleri:**
+- `useTriageStream.ts` — `HistoryEntry { key, patientId, decision, observations }` yapısı; `observationsRef` ile o anki gözlemler yakalanıp decision geldiğinde snapshot olarak history'e eklenir. `verdicts: Record<string, Verdict>` paylaşılan map, `setVerdict(key, v)` action expose edilir. `entryKey(patientId, decidedAt)` unique key helper. `lastObservationAt` + `lastDecisionLatencyMs` Header için expose'lu. **History cap yok** (eskiden `slice(0,10)`, şimdi tüm session).
+- `TriageCard.tsx` — Local verdict state kaldırıldı, `verdict + onVerdictChange` prop'tan alır. Sağ üstte "Güven" yanına (i) tooltip, "Ajan ağırlıkları" başlığı yanına (i) tooltip ("Güven ≠ Ağırlık" açıklaması). Karar saati caption: `HH:MM:SS · 248 ms`. NurseVerdict reuse.
+- `AgentPanel.tsx` — Yeni `SignalPills` alt komponenti (`formatSignal` ile Türkçe). `ReasonHint` (agentReasons'tan). Her kartın güven satırına (i) tooltip. Gait kartında PostureSilhouette. Grid `md:grid-cols-2 xl:grid-cols-4` (wide ekranda 4 yan yana, orta ekranda 2x2).
+- `HistoryList.tsx` — `HistoryEntry[]` shape'i, her satır `<button>` (tıklanabilir), `selectedKey` highlight (sky-50/70), verdict varsa sağda ✓/✗/✎ ikonu (verdictIcon/verdictColorClass). HH:MM:SS damgası tabular-nums. Header'da toplam karar sayacı. `max-h-[480px] overflow-y-auto`.
+- `page.tsx` — `max-w-[1400px]`, lg 2-kolon grid, `selectedKey` state, `handleVerdict(key)` helper (verdict'i `formatVerdictTime()` ile zamanlayıp setVerdict'e iletir), `HistoryDetailModal` overlay'i. Empty state glassmorphism kart.
+- `app/layout.tsx` — Inter font `next/font/google` ile yüklenip `--font-inter` CSS değişkeni `<html>`'e bağlandı.
+- `app/globals.css` — 16px base, 3-stop radial+linear gradient zemin, `font-feature-settings: "cv11", "ss01", "ss03"` (Inter rakam okunabilirliği), tabular-nums utility.
+- `tailwind.config.ts` — Inter font ailesi, soft triage tonları, `status.live/warn/off` renkleri, `shadow-glass/glassLg/ring`, `rounded-4xl`, `statusGlow` animasyonu.
+
+**Backend tarafı destekleyici değişiklikler:**
+- `orchestration/demo.py` — 3 senaryoya (red/yellow/green) `thermal=AgentObservation(...)` eklendi. Kırmızı: ateş 38.8°C + `fever_flag=True`, sarı: 37.7°C borderline ateş, yeşil: 36.6°C normal. `sensor_type="rgb_proxy"` tüm vakalarda. **Önce hiç thermal yoktu** → AgentPanel termal kartı her zaman "Veri bekleniyor" gösteriyordu, supervisor "termal için veri yetersiz" diyordu. Düzeldi.
+- Backend artık `--reload` ile başlatılmalı (development): `python -m uvicorn backend_api.app.main:app --reload --host 127.0.0.1 --port 8000` — `demo.py` veya diğer Python kaynak değişiklikleri otomatik yüklenir.
+
+**Hemşire iş akışı (yeni):**
+- Her karar için 3 buton: ✓ Onayla / ✗ Reddet / ✎ Değiştir
+- "Değiştir" inline kategori dropdown'u açar: Kırmızı / Sarı / Yeşil / İptal
+- Verdict verildiğinde butonlar yerine durum banner'ı görünür (yeşil/kırmızı/amber)
+- Banner'da seçilen kategori + saat damgası (HH:MM:SS)
+- Italic gri ibare: "Hemşire kararı ChromaDB'ye kaydedilerek sistem öğrenmesinde kullanılacaktır."
+- Verdict map paylaşılan state'te → aynı karar hem ana TriageCard'tan hem history modal'ından verdict verilebilir, ikisi de aynı görünür
+- Geçmiş satıra tıkla → modal açılır → o anki 4 ajan snapshot'ı + verdict
+- History satırlarında verdict varsa sağda mini ikon (✓ yeşil / ✗ kırmızı / ✎ amber)
+
+**Tooltip içerikleri:**
+- "Güven" (AgentPanel): "Ajanın kendi gözleminin kalitesine emniyeti. Yüz tespit edildi mi, ışık yeterli mi, sinyal kararlı mı — bu metrikten gelir."
+- "Güven" (TriageCard): "Supervisor'ın bu karara olan toplam emniyeti. Ajan güvenleri ve ağırlıklı toplamından hesaplanır."
+- "Ağırlık": "Supervisor'ın bu ajanı nihai karara ne kadar dahil ettiği. Düşük güvenli ajan otomatik düşük ağırlık alır. Güven ≠ Ağırlık: Güven ajanın kendi ölçümünden, ağırlık supervisor'ın değerlendirmesinden gelir."
+
+**Sayfa header'da sistem durumu:**
+- `KAMERA` pili: son `agent_observation` zamanı <5sn → emerald (canlı glow), <15sn → amber (uyarı), aksi → slate (off)
+- `API` pili: SSE bağlantı durumu (live/connecting/offline)
+- `LLM` pili: son `decision.latency_ms`'e göre — >100ms → "LLM" emerald (gerçek), ≤100ms → "LLM·mock" amber, hiç karar yoksa "LLM" off
+- Sağ uçta siyah pill içinde HH:MM:SS canlı saat (1sn interval)
+
+**Doğrulama:**
+- `npx tsc --noEmit` → clean (frontend)
+- Dev server (npm run dev) tüm modül compile ediyor, runtime error yok
+- Demo butonlarıyla canlı test: termal görünüyor, postür silüeti sallantılı, tooltip'ler hover'da, verdict butonları çalışıyor, modal açılıyor, Türkçe sinyaller doğru görünüyor.
+- 50+ demo tetiklemede history sınırsız büyüyor, scroll çalışıyor, seçili satır highlight olunca modal aynı snapshot'ı gösteriyor.
+
+**Bug fix turu (oturum içinde):**
+- `next build` dev mode'da çalıştırıldı, `.next/` dizinindeki dev chunk'larını ezdi → tüm statik dosyalar 404 → kullanıcı sitenin bozulduğunu gördü. `.next/` silinip `npm run dev` yeniden başlatılarak düzeltildi. Bundan sonra dev mode'da **sadece `npx tsc --noEmit`** ile tip kontrolü yapılacak; `next build` ya ayrı worktree'de ya da dev'i durdurarak çalıştırılacak.
+
+**Yeni dosyalar (7):**
+```
+frontend/components/Tooltip.tsx
+frontend/components/PostureSilhouette.tsx
+frontend/components/NurseVerdict.tsx
+frontend/components/HistoryDetailModal.tsx
+frontend/lib/agentReasons.ts
+frontend/lib/signalLabels.ts
+```
+
+**Yeniden yazılan/güncellenen (10):**
+```
+frontend/app/layout.tsx          # Inter font wiring
+frontend/app/globals.css         # 16px base, gradient zemin, tabular-nums
+frontend/app/page.tsx            # Wide layout, modal kontrolü, paylaşılan verdict
+frontend/tailwind.config.ts      # Token genişletme
+frontend/components/Header.tsx           # Büyük başlık, 3 status pili, canlı saat
+frontend/components/TriageCard.tsx       # Verdict prop, tooltip'ler, karar saati
+frontend/components/AgentPanel.tsx       # SignalPills, ReasonHint, PostureSilhouette
+frontend/components/HistoryList.tsx      # Tıklanabilir + verdict ikonu + saat damgası
+frontend/components/useTriageStream.ts   # HistoryEntry snapshot + verdicts map
+orchestration/demo.py            # 3 senaryoya thermal observation
+.gitignore                       # *.tsbuildinfo + kök package-lock.json
+```
+
+**Açık takipler / kalan iş:**
+- **Backend `/api/triage/feedback` endpoint'i yok** — hemşire verdict'leri şu an sadece tarayıcı belleğinde, sayfa yenilenince kayboluyor. ChromaDB'ye yazımı için yeni endpoint + supervisor öğrenme döngüsü ileride yapılacak. UI hazır, sadece HTTP wire bekliyor.
+- 3 saniyelik "Analiz ediliyor..." pencere animasyonu (orijinal Faz 1 planında vardı) henüz eklenmedi — şu an decision anlık görünüyor, observation/decision arası halka animasyonu yok. Backend event şarşt değil; frontend'te observation→decision timing'inden çıkarılabilir.
+- `next build` dev mode'da çalıştırılma riski — geliştirici dökümanına / Makefile'a not düşülmeli.
+- Termal ajan hâlâ proxy modunda (confidence ≤0.60); gerçek MLX90640/FLIR bağlandığında `ThermalAgent.analyze()`'a sıcaklık matrisi besleyecek `ThermalSource` yazılmalı (Faz 5'te belirlenmişti).
+
 ---
 
 ## Açık kararlar
@@ -184,6 +298,8 @@ Bu dosya geliştirme oturumlarının kaldığı yerden devam edebilmesi için tu
 - **Ajan sayısı:** Uygulama 4 ajan (gait, skin, respiration, thermal). `docs/teknik_rapor.md` hâlâ 5 ajandan (termal + yüz ifadesi) bahsediyor; yüz ifadesi ajanı kapsam dışı bırakıldı, teknik rapor hizalama beklemede.
 - **LLM provider:** API key yoksa `MockLLMClient` otomatik devreye girer. Gerçek LLM için `.env`'e `ANTHROPIC_API_KEY` veya `OPENAI_API_KEY` girilmeli.
 - **Termal kamera:** Şu an `rgb_proxy` modunda. Gerçek MLX90640/FLIR bağlandığında `ThermalAgent.analyze()`'a sıcaklık matrisi besleyecek ayrı bir `ThermalSource` yazılmalı.
+- **Hemşire verdict persistance:** Frontend'te Onayla/Reddet/Değiştir akışı tamamlandı (2026-05-14), ama backend'e POST yapılmıyor. Verdict'ler `useTriageStream` içindeki `verdicts` map'inde — tarayıcı belleğinde. `POST /api/triage/feedback` endpoint'i + ChromaDB persistance gerekiyor; supervisor öğrenmesi bu veriyi kullanacak.
+- **Frontend dev mode'da `next build` riski:** Aynı `.next/` dizini paylaşıldığı için dev server ayaktayken `next build` çalıştırmak dev chunk'larını ezer (2026-05-14 oturumunda yaşandı). Doğrulama için sadece `npx tsc --noEmit` veya ayrı worktree'de build.
 
 ## Çalıştırma reçetesi
 ```bash

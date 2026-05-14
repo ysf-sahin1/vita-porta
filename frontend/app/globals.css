@@ -4,9 +4,27 @@
 
 :root {
   color-scheme: light;
+  --bg-stop-1: #f8fafc;
+  --bg-stop-2: #ffffff;
+  --bg-stop-3: #eef4fb;
+}
+
+html {
+  font-size: 16px;
 }
 
 body {
-  background: linear-gradient(180deg, #f8fafc 0%, #eef2f6 100%);
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "cv11", "ss01", "ss03";
+  background:
+    radial-gradient(1200px 600px at 85% -10%, rgba(125, 211, 252, 0.18), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(167, 243, 208, 0.15), transparent 60%),
+    linear-gradient(180deg, var(--bg-stop-1) 0%, var(--bg-stop-2) 45%, var(--bg-stop-3) 100%);
+  background-attachment: fixed;
   min-height: 100vh;
+}
+
+/* Inter'da rakam genişliği tabular: timestamp ve metrikler kolon kayması yapmasın */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }

@@ -37,6 +37,18 @@ def critical_case() -> AgentBundle:
             summary_tr="Sağa doğru sallantılı yürüyüş, asimetrik adım örüntüsü",
             signals={"sway": True, "severity": "high", "symmetry": 0.31},
         ),
+        thermal=AgentObservation(
+            agent="thermal",
+            confidence=0.58,
+            summary_tr="Ateş şüphesi: tahmini cilt sıcaklığı 38.8°C (RGB proxy)",
+            signals={
+                "temp_estimate_c": 38.8,
+                "fever_flag": True,
+                "hypothermia_flag": False,
+                "warmth_score": 0.92,
+                "sensor_type": "rgb_proxy",
+            },
+        ),
     )
 
 
@@ -54,6 +66,18 @@ def ambiguous_case() -> AgentBundle:
             confidence=0.71,
             summary_tr="Hafif sallantı, tek başına stabilite riski",
             signals={"sway": True, "severity": "mild", "symmetry": 0.62},
+        ),
+        thermal=AgentObservation(
+            agent="thermal",
+            confidence=0.52,
+            summary_tr="Hafif ısı artışı: tahmini 37.7°C, ateş eşiğinde (RGB proxy)",
+            signals={
+                "temp_estimate_c": 37.7,
+                "fever_flag": True,
+                "hypothermia_flag": False,
+                "warmth_score": 0.68,
+                "sensor_type": "rgb_proxy",
+            },
         ),
     )
 
@@ -78,6 +102,18 @@ def stable_case() -> AgentBundle:
             confidence=0.80,
             summary_tr="Dik ve simetrik yürüyüş",
             signals={"sway": False, "severity": "none", "symmetry": 0.91},
+        ),
+        thermal=AgentObservation(
+            agent="thermal",
+            confidence=0.55,
+            summary_tr="Normal cilt sıcaklığı: tahmini 36.6°C (RGB proxy)",
+            signals={
+                "temp_estimate_c": 36.6,
+                "fever_flag": False,
+                "hypothermia_flag": False,
+                "warmth_score": 0.48,
+                "sensor_type": "rgb_proxy",
+            },
         ),
     )
 
