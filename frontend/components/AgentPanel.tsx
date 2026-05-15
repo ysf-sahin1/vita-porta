@@ -3,7 +3,7 @@
 import { cn } from "@/lib/cn";
 import { inferAgentReason } from "@/lib/agentReasons";
 import { formatSignal } from "@/lib/signalLabels";
-import type { AgentObservation } from "@/lib/types";
+import type { AgentObservation, TriageCategory } from "@/lib/types";
 import {
   Activity,
   AlertTriangle,
@@ -13,12 +13,13 @@ import {
   Smile,
   Thermometer,
 } from "lucide-react";
+import { AnatomicalRadial } from "./AnatomicalRadial";
 import { PostureSilhouette } from "./PostureSilhouette";
 import { Tooltip } from "./Tooltip";
 
-type Agent = "gait" | "skin" | "respiration" | "thermal" | "expression";
+export type Agent = "gait" | "skin" | "respiration" | "thermal" | "expression";
 
-const AGENT_META: Record<
+export const AGENT_META: Record<
   Agent,
   { label: string; Icon: typeof Activity; color: string; bg: string }
 > = {
@@ -36,19 +37,28 @@ const AGENT_META: Record<
 
 export function AgentPanel({
   observations,
+  category,
 }: {
   observations: Partial<Record<Agent, AgentObservation>>;
+  category: TriageCategory | null;
 }) {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
-      {(Object.keys(AGENT_META) as Agent[]).map((agent) => (
-        <AgentCard key={agent} agent={agent} obs={observations[agent]} />
-      ))}
-    </div>
+    <>
+      {/* Wide ekranda anatomik radyal — silüet merkezde, ajanlar etrafında */}
+      <div className="hidden xl:block">
+        <AnatomicalRadial observations={observations} category={category} />
+      </div>
+      {/* Mobile / tablet fallback — düz grid */}
+      <div className="xl:hidden grid grid-cols-1 md:grid-cols-2 gap-4">
+        {(Object.keys(AGENT_META) as Agent[]).map((agent) => (
+          <AgentCard key={agent} agent={agent} obs={observations[agent]} />
+        ))}
+      </div>
+    </>
   );
 }
 
-function AgentCard({ agent, obs }: { agent: Agent; obs: AgentObservation | undefined }) {
+export function AgentCard({ agent, obs }: { agent: Agent; obs: AgentObservation | undefined }) {
   const meta = AGENT_META[agent];
   const { Icon } = meta;
   const reason = obs ? inferAgentReason(obs) : null;

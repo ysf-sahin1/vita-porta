@@ -108,6 +108,56 @@ Bu dosya geliştirme oturumlarının kaldığı yerden devam edebilmesi için tu
 - `python -m pytest gateway_agents/tests orchestration/tests -v` → **11/11 PASS**.
 - Webcam runner canlı çalıştı: backend'e POST, dashboard'da kararlar göründü (2026-05-13 oturumu).
 
+## Faz 4.6 — Hemşire girişi + Anatomik radyal layout · ✅ Tamamlandı (2026-05-16)
+
+**Bağlam:** 5. ajan eklendikten sonra frontend "canlılık" eksikliği vardı; ajanlar 5'li düz grid, statik. Kullanıcı oturumun başında yoktu, herkes anonim olarak dashboard'a düşüyordu. Bu turda iki şey yapıldı:
+1. **Hemşire giriş ekranı** — ad / soyad / hastane adı zorunlu, localStorage'da hatırlanır.
+2. **Anatomik radyal layout** — silüet ortada, 5 ajan vücudun gözlemlediği bölgeye yerleştirilmiş; bağlantı çizgileri dashed flow ile sürekli canlı, silüet kategori rengiyle soft pulse atar.
+
+Mevcut tasarım iyiymiş diye kullanıcı sinyal pill'leri / güven yüzdeleri / sinyal Türkçeleştirmesini koruma istedi → **AgentCard içeriği değişmedi**, sadece dizilim değişti.
+
+**Yeni dosyalar (4):**
+- `frontend/lib/session.ts` — `NurseSession` tipi + `getSession/setSession/clearSession/displayName` helpers. localStorage key `vita_porta_session`. KVKK uyumu: hemşire ve hastane verisi cihazda kalır, backend'e gönderilmez.
+- `frontend/components/LoginScreen.tsx` — glassmorphism kart, 3 alan (Ad / Soyad / Hastane), validation (min 2 karakter), invalid state'lerde rose-50 vurgu + altta uyarı. Mevcut zeminle uyumlu (gradient + Inter font). Footer'da "tanı koymaz" notu.
+- `frontend/components/SessionGate.tsx` — root wrapper. `mounted` state ile hydration race önlenir (SSR mismatch yok). React Context (`useNurseSession`) ile alt komponentler session + logout erişir.
+- `frontend/components/AnatomicalRadial.tsx` — `aspect-[5/3]` container, SVG arka plan (viewBox `0 0 100 60`):
+  - Dekoratif yumuşak halka (radial gradient, kategori rengi)
+  - 5 bağlantı çizgisi (dashed, ajan rengiyle, observation varsa `animate-lineFlow` ile sürekli akış, yoksa düşük opacity)
+  - **Silüet vektörü** (inline SVG): büyük çöp adam — kafa, omuz, gövde, kollar, bacaklar. Gait sinyalleriyle dinamik: `sway_detected` → `silhouetteSway` rotate animasyonu, `symmetry_status="anormal"` → asimetrik omuz. Solunum confidence > 0.3 → göğüs çizgisi `chestBreathe` ile nefes alır gibi pulse. Kategori rengi outline; orta halka `silhouettePulse` ile genişleyip daralır.
+  - 5 ajan kartı container içinde absolute yüzdelik pozisyonda:
+    - **Expression** sol üst — kafa sol
+    - **Thermal** sağ üst — alın
+    - **Skin** sol orta — yanak
+    - **Respiration** sağ orta — göğüs
+    - **Gait** orta alt — bacaklar
+
+**Güncellenen dosyalar (5):**
+- `frontend/components/AgentPanel.tsx`:
+  - `AgentCard` ve `Agent` / `AGENT_META` artık export'lu (AnatomicalRadial reuse eder).
+  - Komponent responsive switch: `xl+` AnatomicalRadial, altında düz grid (mobile/tablet fallback).
+  - Yeni `category` prop'u (silüet pulse rengi için).
+- `frontend/components/Header.tsx`:
+  - `useNurseSession()` ile hemşire bilgisi alınıyor.
+  - Subtitle satırı "Hemşire triaj asistanı…" yerine ad-soyad + hastane (`User` + `Building2` ikonlarıyla).
+  - Sağa "Çıkış" butonu (LogOut ikonu, hover'da rose-50). Canlı saat + 3 status pili korundu.
+- `frontend/app/page.tsx`:
+  - Page komponentı `<SessionGate><Dashboard /></SessionGate>` ile sarıldı.
+  - Dashboard içeriği aynen kaldı; AgentPanel'e `category` geçildi (`current?.decision?.category ?? null`).
+- `frontend/tailwind.config.ts` — 4 yeni animasyon:
+  - `lineFlow` — dashed stroke offset (1.8s linear, bağlantı çizgileri için)
+  - `silhouettePulse` — scale + opacity (3s ease-in-out, silüet halkası)
+  - `silhouetteSway` — rotate ±1.5° (2.2s ease-in-out, sallantılı yürüyüşte silüet)
+  - `chestBreathe` — strokeWidth 0.7↔1.1 (3s ease-in-out, göğüs nefes)
+
+**Doğrulama:**
+- `npx tsc --noEmit` → clean.
+- Manuel doğrulama: dev server'da ilk açılışta login ekranı görünür, giriş yapıldıktan sonra ana ekran; tarayıcı kapatılıp tekrar açıldığında ana ekran direkt gelir (localStorage). Çıkış butonu → login'e döner. Radyal layout `xl` ve üstünde aktif; altında mevcut grid çalışır.
+
+**Açık takipler:**
+- Hemşire verdict persistance (backend `POST /api/triage/feedback`) hâlâ açık — Faz 5.6 dışı.
+- Radyal layout sadece `xl+` (≥1280px). Daha küçük ekranda 5'li grid'e düşer; tablet için ayrı bir orta seviye gerekirse ilerleyen turda.
+- Bağlantı çizgileri sabit yüzdelik koordinatlar — kart içerikleri büyürse silüetle hizalanma kayabilir. Şu an stabil; dinamik koordinat (ref-based) gerekirse ileride.
+
 ## Faz 5.6 — Yüz İfadesi Ajanı (5. ajan, Faz 5 resmi kapanışı) · ✅ Tamamlandı (2026-05-16)
 
 **Bağlam:** `docs/teknik_rapor.md` baştan beri 5 ajandan bahsediyordu (yürüyüş, ten rengi, solunum, termal, **yüz ifadesi**). Termal 2026-05-13'te eklendi ama yüz ifadesi ajanı atlanmıştı. Bu turda 5. ajan eklendi, schema/prompt/mock/runner/test ve **component entegrasyonuna kadar** olan frontend güncellendi. Asıl redesign (yeni layout/stil) ayrı bir tura bırakıldı.

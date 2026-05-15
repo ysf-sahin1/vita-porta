@@ -9,11 +9,20 @@ import {
   formatVerdictTime,
   type Verdict,
 } from "@/components/NurseVerdict";
+import { SessionGate } from "@/components/SessionGate";
 import { TriageCard } from "@/components/TriageCard";
 import { entryKey, useTriageStream } from "@/components/useTriageStream";
 import { useState } from "react";
 
 export default function Page() {
+  return (
+    <SessionGate>
+      <Dashboard />
+    </SessionGate>
+  );
+}
+
+function Dashboard() {
   const {
     status,
     current,
@@ -69,7 +78,10 @@ export default function Page() {
             <div className="text-xs uppercase tracking-wider text-slate-500 mb-3 px-1">
               Ajan gözlemleri
             </div>
-            <AgentPanel observations={observations} />
+            <AgentPanel
+              observations={observations}
+              category={current?.decision?.category ?? null}
+            />
           </div>
         </section>
 

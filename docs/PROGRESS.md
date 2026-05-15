@@ -2,108 +2,74 @@
 
 Bu dosya geliştirme oturumlarının kaldığı yerden devam edebilmesi için tutulur. Her faz: durum, neyin tamamlandığı, neyin kaldığı, ilgili dosyalar ve doğrulama yöntemi.
 
-**Genel durum:** 7/8 faz tamamlandı. Sistem uçtan uca canlı çalışıyor (mock + gerçek kamera). Edge firmware ve Docker infrastructure kaldı.
+**Genel durum (2026-05-16):**
+- ✅ **Faz 0–5** tamamlandı (5 ajan: gait / skin / respiration / thermal / expression)
+- ✅ **Faz 4.5** (Health-OS frontend redesign) tamamlandı
+- ✅ **Faz 4.6** (hemşire giriş ekranı + anatomik radyal layout) tamamlandı
+- ✅ **Faz 5.5** (origin/main Phase 5 rewrite ile birleşme) tamamlandı
+- ✅ **Faz 5.6** (yüz ifadesi ajanı eklenmesiyle Faz 5'in resmi kapanışı) tamamlandı
+- ✅ **Faz 7** (uçtan uca canlı demo doğrulaması) tamamlandı
+- 🔴 **Faz 6** (edge firmware + Docker compose) başlanmadı — hackathon için opsiyonel
+- 🔴 **Faz 8** (pitch polish + demo videosu yedek) başlanmadı
+
+Sistem **gerçek webcam'den canlı çalışıyor**: 5 görsel ajan paralel işliyor, supervisor karar üretiyor, dashboard SSE ile yayınlıyor. Webcam yoksa demo butonlarıyla 3 senaryo (kırmızı/sarı/yeşil) tetiklenebilir.
+
+Detaylı tur-tur değişiklik kayıtları için `docs/gelisme_ilerlemesi.md` dosyasına bakın.
 
 ---
 
-## Faz 0 — Önhazırlık
-
-**Durum:** ✅ Tamamlandı
+## Faz 0 — Önhazırlık · ✅ Tamamlandı
 
 - NotebookLM hesabı `mendeburlale@gmail.com` ile bağlandı
 - "Vita Porta: AI Emergency Triage Assistant" notebook'u oluşturuldu, pitch + teknik rapor yüklendi
 - NotebookLM MCP üzerinden `nlm login` ile bu projeye bağlı
 - Notebook ID: `d9854800-b703-4b71-919f-6121bb3e05d8`
-- İş akışı: proje bağlamı her zaman NotebookLM'den çekilir, kullanıcı tekrar açıklamak zorunda kalmaz
 
 ---
 
-## Faz 1 — Monorepo iskeleti + Pydantic şemaları
+## Faz 1 — Monorepo iskeleti + Pydantic şemaları · ✅ Tamamlandı
 
-**Durum:** ✅ Tamamlandı
-
-### Yapılanlar
 - Klasör yapısı: `edge_firmware/`, `gateway_agents/`, `orchestration/`, `backend_api/`, `frontend/`, `infrastructure/`, `docs/`
 - Kök dosyalar: `README.md`, `.gitignore`, `.env.example`, `pyproject.toml`
-- Mevcut iki dokümantasyon (`pitch.md`, `teknik_rapor.md`) `docs/` altına taşındı
 - `orchestration/schemas.py` — projenin omurgası:
   - `TriageCategory` enum (red/yellow/green/insufficient) + Türkçe etiket haritası
-  - `AgentObservation` — bir ajanın tek bir gözlemi (confidence, summary_tr, signals)
-  - `AgentBundle` — üç ajanın gözlem demeti
+  - `AgentObservation` — bir ajanın tek gözlemi (agent, confidence, summary_tr, signals)
+  - `AgentBundle` — **5 ajanın** gözlem demeti (gait / skin / respiration / thermal / expression)
   - `TriageDecision` — supervisor çıktısı (kategori, gerekçe, ağırlıklar, RAG referansları, gecikme)
   - `TriageEvent` — SSE üzerinden gönderilen wire envelope
 - `orchestration/config.py` — pydantic-settings ile env tabanlı yapılandırma
 
-### Dosyalar
-```
-pyproject.toml
-.env.example
-.gitignore
-README.md
-orchestration/__init__.py
-orchestration/schemas.py
-orchestration/config.py
-docs/pitch.md
-docs/teknik_rapor.md
-```
-
-### Doğrulama
-`pip install -e ".[dev]"` ile bağımlılıkların kurulması yeterli.
+**Doğrulama:** `pip install -e ".[dev]"` ile bağımlılıkların kurulması yeterli.
 
 ---
 
-## Faz 2 — Supervisor (LangGraph) + RAG
+## Faz 2 — Supervisor (LangGraph) + RAG · ✅ Tamamlandı
 
-**Durum:** ✅ Tamamlandı
-
-### Yapılanlar
 - `orchestration/prompts/supervisor.py` — ESI tabanlı sistem prompt'u:
+  - 5 ajan için yazıldı (yürüyüş / ten rengi / solunum / termal / yüz ifadesi)
   - Tanı koyma yasağı, ilaç önerme yasağı, son söz hemşirede
   - Düşük confidence (<0.5) ise sinyali ağırlığını düşür, "veri yetersiz" bildir
+  - Termal proxy modu özel kuralları + Expression özel kuralları (ağrı / bilinç / felç şüphesi)
   - Çıktı kesin JSON formatı: `{category, rationale_tr, confidence, per_agent_weights}`
 - `orchestration/llm.py` — provider-agnostic LLM client:
   - `AnthropicClient`, `OpenAIClient`, `MockLLMClient` (kural tabanlı fallback)
-  - `build_llm_client()` env'e göre uygun istemciyi döner
-  - Mock client: teknik raporda belirtilen "LLM API kesintisi → kural tabanlı yedek" gereksinimini karşılar
+  - MockLLM tüm 5 ajan için weight + flag mantığı içeriyor; eski demo vocab + yeni live-agent vocab birlikte destekleniyor
 - `orchestration/supervisor.py` — LangGraph state graph:
   - `retrieve_rag → ask_llm → validate` üç düğümlü pipeline
-  - LLM hatasında otomatik olarak MockLLMClient'a fallback
+  - LLM hatasında otomatik MockLLMClient fallback
   - `latency_ms` ölçümü ekleniyor
 - `orchestration/rag/` — RAG katmanı:
-  - `esi_cases.py` — 5 ESI tohum vakası (2 kırmızı, 2 sarı, 1 yeşil)
-  - `retriever.py` — `RagRetriever` protocol + `InMemoryRetriever` (default) + `ChromaRetriever` (lazy ChromaDB)
-  - `seed.py` — ChromaDB persistent store'a tohum yüklemek için
-- `orchestration/demo.py` — üç senaryolu uçtan uca demo (kritik/belirsiz/stabil)
+  - `esi_cases.py` — 5 ESI tohum vakası
+  - `retriever.py` — `RagRetriever` protocol + `InMemoryRetriever` (default) + `ChromaRetriever` (lazy)
+- `orchestration/demo.py` — üç senaryolu uçtan uca demo (kritik/belirsiz/stabil); 3 senaryoya da thermal + expression observations eklendi
 
-### Dosyalar
-```
-orchestration/prompts/__init__.py
-orchestration/prompts/supervisor.py
-orchestration/llm.py
-orchestration/supervisor.py
-orchestration/demo.py
-orchestration/rag/__init__.py
-orchestration/rag/esi_cases.py
-orchestration/rag/retriever.py
-orchestration/rag/seed.py
-orchestration/tests/__init__.py
-orchestration/tests/test_supervisor.py
-```
-
-### Doğrulama
-```bash
-pytest orchestration/tests -v          # 5/5 pass
-python -m orchestration.demo           # Kırmızı/Sarı/Yeşil üç senaryo çıktı verir
-```
+**Doğrulama:** `pytest orchestration/tests -v` → 5/5 pass.
 
 ---
 
-## Faz 3 — FastAPI backend + SSE
+## Faz 3 — FastAPI backend + SSE · ✅ Tamamlandı
 
-**Durum:** ✅ Tamamlandı
-
-### Yapılanlar
-- `backend_api/app/event_bus.py` — in-process pub/sub (asyncio.Queue tabanlı, ileride Redis/NATS ile değişir)
+- `backend_api/app/event_bus.py` — in-process pub/sub (asyncio.Queue tabanlı)
 - `backend_api/app/main.py`:
   - `GET /healthz`
   - `POST /api/triage/run` — `AgentBundle` alır, `TriageDecision` döner ve SSE bus'a basar
@@ -111,122 +77,103 @@ python -m orchestration.demo           # Kırmızı/Sarı/Yeşil üç senaryo ç
   - `POST /api/triage/demo?scenario=all|red|yellow|green` — demo bundle'larını sıralı oynatır
 - CORS açık (dev için `*`), lifespan ile EventBus + Supervisor singleton
 
-### Dosyalar
-```
-backend_api/__init__.py
-backend_api/app/__init__.py
-backend_api/app/event_bus.py
-backend_api/app/main.py
-```
-
-### Doğrulama
+**Doğrulama:**
 ```bash
 uvicorn backend_api.app.main:app --reload
-curl http://127.0.0.1:8000/healthz
-curl -X POST "http://127.0.0.1:8000/api/triage/demo?scenario=red"
+curl http://127.0.0.1:8000/healthz                                # {"status":"ok"}
+curl -X POST "http://127.0.0.1:8000/api/triage/demo?scenario=red" # 200
 ```
 
 ---
 
-## Faz 4 — Next.js hemşire dashboard'u
+## Faz 4 — Next.js hemşire dashboard'u · ✅ Tamamlandı
 
-**Durum:** ✅ Tamamlandı
-
-### Yapılanlar
 - Next.js 14 + React 18 + Tailwind CSS + lucide-react ikonlar
-- `frontend/lib/types.ts` — backend ile birebir TypeScript şemaları
-- `frontend/lib/api.ts` — `playDemo()`, `streamUrl()`
-- `frontend/lib/cn.ts` — clsx + tailwind-merge utility
-- Bileşenler:
-  - `components/Header.tsx` — başlık + canlı yayın durum noktası
-  - `components/TriageCard.tsx` — büyük triaj kartı, kırmızıda pulse-ring animasyonu
-  - `components/AgentPanel.tsx` — üç ajan kartı, gözlem yoksa "Veri bekleniyor"
-  - `components/HistoryList.tsx` — son 5 karar
-  - `components/DemoControls.tsx` — 4 demo butonu
-  - `components/useTriageStream.ts` — SSE EventSource hook'u
+- `frontend/lib/{types,api,cn}.ts` — backend ile birebir şemalar, fetch helpers, tailwind merge utility
+- Bileşenler: `Header`, `TriageCard`, `AgentPanel`, `HistoryList`, `DemoControls`, `useTriageStream`
 - `app/page.tsx` — dashboard ana sayfa
-- Tailwind theme: özel `triage.red/yellow/green/gray` renkleri + `animate-pulseRing` keyframe
+- Tailwind theme: özel `triage.red/yellow/green/gray` renkleri + `animate-pulseRing`
 
-### Dosyalar
-```
-frontend/package.json
-frontend/next.config.js
-frontend/tsconfig.json
-frontend/postcss.config.js
-frontend/tailwind.config.ts
-frontend/app/globals.css
-frontend/app/layout.tsx
-frontend/app/page.tsx
-frontend/components/{Header,TriageCard,AgentPanel,DemoControls,HistoryList,useTriageStream}.{tsx,ts}
-frontend/lib/{api,cn,types}.ts
-```
+**Faz 4.5 (Health-OS redesign — 2026-05-14):** Sayfa komple yenilendi:
+- Inter font (`next/font/google`), cross-platform tutarlı render
+- 16px base size, gradient zemin + glassmorphism kartlar (`bg-white/70 backdrop-blur-xl`)
+- 2-kolon wide layout (sol triage+ajanlar, sağ history timeline)
+- Yeni komponentler: `Tooltip`, `PostureSilhouette`, `NurseVerdict`, `HistoryDetailModal`
+- `lib/agentReasons.ts` + `lib/signalLabels.ts` — Türkçe sinyal etiketleri, info/warn/error reason pill'leri
+- Hemşire iş akışı: ✓ Onayla / ✗ Reddet / ✎ Değiştir + verdict map (paylaşılan state, ChromaDB persistance henüz wire yok)
+- History tıklanabilir → modal'da o anki 4 ajan snapshot'ı + verdict
+- Tooltip içerikleri: Güven vs Ağırlık ayrımı net şekilde anlatıldı
 
-### Doğrulama
+**Faz 4.6 (Login + Anatomik Radyal — 2026-05-16):**
+- Hemşire giriş ekranı: `lib/session.ts` (localStorage, KVKK-uyumlu), `LoginScreen`, `SessionGate` (React Context). Ad / Soyad / Hastane Adı zorunlu, min 2 karakter, validation. Bir kere girildiğinde hatırlanır.
+- Header'da hemşire ad-soyad + hastane satırı + "Çıkış" butonu (canlı saat ve status pilleri korundu)
+- **AnatomicalRadial.tsx** — yeni `xl+` layout:
+  - Silüet ortada (çöp adam, kategori rengiyle outline + `silhouettePulse` dış halka)
+  - 5 ajan kartı vücudun gözlemlediği bölgede absolute positioned:
+    - Expression sol üst (kafa), Thermal sağ üst (alın)
+    - Skin sol orta (yanak), Respiration sağ orta (göğüs)
+    - Gait orta alt (bacaklar)
+  - SVG bağlantı çizgileri ajan rengiyle dashed (`lineFlow` animasyonu)
+  - Silüet dinamik: gait sallantı → `silhouetteSway` rotate, asimetri → omuz kayık, solunum → göğüs `chestBreathe` pulse
+  - `xl` altında düz grid'e fallback (mobile/tablet)
+- `tailwind.config.ts` — 4 yeni animasyon (`lineFlow`, `silhouettePulse`, `silhouetteSway`, `chestBreathe`)
+
+**Doğrulama:**
 ```bash
-cd frontend
-npm install
-npm run build              # temiz derlendi
-npm run dev                # http://127.0.0.1:3000
+cd frontend && npm install && npm run dev   # http://127.0.0.1:3000
+npx tsc --noEmit                            # clean
 ```
 
-**Uçtan uca testi:** Backend açıkken dashboard'da "Üçünü sırayla oynat" butonuna basınca üç hasta sırayla görünür, her ajan kartı dolar, triaj kartı renkli pulse ile gelir, geçmiş listesi büyür.
+**Uçtan uca test:** Login ekranı → giriş → dashboard. Backend açıkken "Demo senaryoları" → "Üçünü sırayla oynat" → 3 hasta sırayla görünür, 5 ajan kartı dolar, silüet kategoriye göre pulse atar, geçmiş listesi büyür.
 
 ---
 
-## Faz 5 — Çoklu Modalite Ajanları (gait / skin / respiration / thermal / expression)
+## Faz 5 — 5 görsel ajan (gait / skin / respiration / thermal / expression) · ✅ Tamamlandı
 
-**Durum:** 🟡 Kısmen Tamamlandı (Temel ajanlar devrede, yeni ajanlar planlandı)
-
-### Yapılanlar
-
-**Mevcut Görsel Ajanlar** (`gateway_agents/agents/`):
+**Ana yapı** (`gateway_agents/agents/`):
 - `base.py` — `AnalysisWindow` dataclass + soyut `Agent` sınıfı
-- `gait.py` — `GaitAgent`: MediaPipe Pose, omuz/kalça x-std (sway eşiği 0.025), shoulder asymmetry (eşik 0.04). Confidence = visibility ortalaması (omuz + kalça landmarks). Lazy mediapipe import.
-- `skin.py` — `SkinAgent`: OpenCV Haar Cascade yüz tespiti + HSV (S_pale<80, V_pale>120). Dim brightness (V<60) → confidence 0.5 cap. 5 frame örnekleme.
-- `respiration.py` — `RespirationAgent`: Sabit göğüs ROI (40% × 30%), frame-diff (threshold 25), smoothed peak detection, BPM kategorileri (yavaş<10, normal 10-22, hızlı>22, düzensiz CV>0.5). Erratic motion (CV>1.0) → confidence 0.2.
-
-### Yapılacaklar (Planlanan Yeni Ajanlar)
-- 🔴 `thermal.py` — **Vücut Sıcaklığı Ajanı**: MLX90640 / FLIR Lepton termal kamera verilerini analiz ederek bölgesel sıcaklık istatistikleri (ateş > 37.5 °C veya hipotermi < 35.5 °C) çıkaracak.
-- 🔴 `expression.py` — **Yüz İfadesi Ajanı**: MediaPipe Face Mesh ile ağrı, distres, anksiyete ve yüz simetrisi bozukluklarını saptayacak.
+- `gait.py` — `GaitAgent`: MediaPipe Pose, omuz/kalça x-std (sway eşiği 0.025), shoulder asymmetry (eşik 0.04). Confidence = visibility ortalaması.
+- `skin.py` — `SkinAgent`: OpenCV Haar Cascade yüz tespiti + HSV (`skin_tone` ∈ {solgun, belirsiz, normal}). Dim brightness → confidence cap.
+- `respiration.py` — `RespirationAgent`: Sabit göğüs ROI, frame-diff, peak detection. `breathing_pattern` ∈ {hızlı, yavaş, düzensiz, apne_riski, normal}.
+- `thermal.py` — `ThermalAgent` (2026-05-13): MediaPipe Face Detection ile yüz ROI + LAB renk uzayı warmth indeksi → tahmini °C. `sensor_type="rgb_proxy"` ile confidence max 0.60 (gerçek MLX90640/FLIR bağlanırsa 0.95).
+- `expression.py` — `ExpressionAgent` (2026-05-16): **MediaPipe Face Mesh (468 landmark)** geometrik kural-tabanlı:
+  - EAR (Eye Aspect Ratio) → `eye_openness`, `consciousness_hint`
+  - PSPI'ın basitleştirilmesi (kaş içe-çatma + göz kısma) → `pain_score`, `expression_state`
+  - 6 sol-sağ landmark çifti sapması → `face_asymmetry` (FAST/felç şüphesi girdisi)
+  - `sensor_type="geometric_proxy"`, confidence max 0.55
 
 **IO kaynakları** (`gateway_agents/io/`):
-- `base.py` — `FrameSource` ABC (`fps`, `frames()`, `close()`, context manager)
-- `webcam.py` — `WebcamSource`: cv2.VideoCapture (Windows CAP_DSHOW fallback), target_fps + width/height ayarları
-- `video_file.py` — `VideoFileSource`: native fps okur, `loop=True` desteği (jüri fallback için)
-- `mqtt.py` — `MqttSource`: paho-mqtt `loop_start`, JPEG decode, drop-oldest `Queue(maxsize=64)`. Lazy import.
+- `base.py` — `FrameSource` ABC
+- `webcam.py` — `WebcamSource`: cv2.VideoCapture (Windows CAP_DSHOW fallback, macOS AVFoundation default). Resilient reconnect.
+- `video_file.py` — `VideoFileSource`: native fps okur, `loop=True` desteği
+- `mqtt.py` — `MqttSource`: paho-mqtt `loop_start`, JPEG decode (lazy import)
 
 **Runner** (`gateway_agents/runner.py`):
-- `Runner(source, backend_url, window_duration_s=3.0, max_workers=3)`
-- `ThreadPoolExecutor` ile üç ajan paralel
+- `Runner(source, backend_url, window_duration_s=3.0, max_workers=5)`
+- `ThreadPoolExecutor` ile **5 ajan paralel**
 - `httpx.Client` ile `POST /api/triage/run` (10s timeout)
 - Backend ulaşılamazsa warning + devam (loop crash etmez)
-- `run_once()`, `run_forever()`, context manager support
 - CLI: `python -m gateway_agents.runner [--webcam IDX | --video PATH | --mqtt]`
 
 **Testler** (`gateway_agents/tests/`):
-- `test_agents.py` — 12 test: empty window, black frames, periodic motion, schema conformance (parametrize)
-- `test_runner.py` — 6 test: FakeFrameSource + monkeypatched httpx, partial window, backend unreachable, context manager
+- `test_agents.py` — TestGaitAgent (3) + TestSkinAgent (3) + TestRespirationAgent (3) + TestExpressionAgent (3) + schema conformance (4 parametre)
+- `test_runner.py` — 6 test: FakeFrameSource + monkeypatched httpx, 5-observation beklentisi, partial window, backend unreachable, context manager
 
-### Doğrulama
-
+**Doğrulama:**
 ```bash
-python -m pytest orchestration/tests gateway_agents/tests -v   # 23/23 ✅ (5 supervisor + 18 gateway)
+python -m pytest gateway_agents/tests orchestration/tests -v   # 27/27 ✅
 python -m gateway_agents.runner --webcam 0                      # Canlı kamera demo
 python -m gateway_agents.runner --video docs/test_clip.mp4      # Video dosyası fallback
 ```
 
-### Notlar
-- NotebookLM rehberi izlendi: solunum frame-fark ile basitleştirildi, gait + skin için kalibrasyon eşikleri NotebookLM önerilerine uygun.
-- Mediapipe `>=0.10.14,<0.10.20` pinli (Windows'ta Solutions API son sürümleri).
-- IO sözleşmesi: frame-emitting (`frames() -> Iterator[ndarray]`), runner window'u kendisi batchler.
+**Bağımlılık pinleri:**
+- `mediapipe==0.10.18` — **kritik:** 0.10.20+ Solutions API'sini kaldırdı
+- `httpx>=0.27`
 
 ---
 
-## Faz 6 — Edge firmware + Docker infrastructure
+## Faz 6 — Edge firmware + Docker infrastructure · 🔴 Başlanmadı
 
-**Durum:** 🔴 Başlanmadı
-
-### Yapılacaklar
 - `edge_firmware/vita_porta_cam.ino` — ESP32-CAM Arduino sketch'i:
   - I2S kamera başlat, Wi-Fi bağlan
   - MQTT broker'a (`vitaporta/frames` topic'ine) JPEG frame yayımla
@@ -237,34 +184,76 @@ python -m gateway_agents.runner --video docs/test_clip.mp4      # Video dosyası
   - Backend + Frontend servisleri (production build)
 - `infrastructure/mosquitto/mosquitto.conf` — anonymous allow, port 1883
 
-### Notlar
+**Notlar:**
 - Hackathon demosu için **fiziksel ESP32-CAM şart değil**. Webcam fallback yeterli. Donanım masa üzerinde "veri toplama konseptini" göstermek için durur.
 - Docker compose hackathon submission için bonus puan.
+
+---
+
+## Faz 7 — Uçtan uca canlı demo doğrulaması · ✅ Tamamlandı (2026-05-13)
+
+- Backend + Frontend + Webcam runner üçü birden canlı çalıştırıldı
+- Webcam → 5 ajan (gait/skin/respiration/thermal/expression) → bundle → FastAPI POST → SSE → dashboard akışı doğrulandı
+- Dashboard'da her ~3.5 sn'de yeni triaj kararı (green) göründü
+- "Veri yetersiz" (insufficient) durumu kameradan çıkıldığında otomatik görüldü
+- Webcam yeniden bağlanma (resilient loop) başarıyla çalıştı
+
+**Kalan (Faz 8'e taşındı):**
+- Farklı vücut pozisyonları (sallanma, eğilme, hızlı nefes, ağrı mimiği) ile sarı/kırmızı kararları tetikleme testi
+- Demo videosu kaydı (yedek senaryo)
+
+---
+
+## Faz 8 — Pitch + jüri sunumu polish · 🔴 Başlanmadı
+
+- `docs/pitch.md` revizyonu (sunum scriptiyle birlikte)
+- Demo videosu (yedek senaryo: webcam müsait değilse `VideoFileSource` ile önceden çekilmiş 5-10 saniyelik test videoları)
+- ESP32-CAM fiziksel prop (lehimleme + kasa) — jüri masasında "veri toplama konsepti" objesi
+- `docs/teknik_rapor.md` zaten 5 ajandan bahsediyor; artık kodla birebir hizalı (önceki "hizalama beklemede" notu kapandı)
 
 ---
 
 ## Hızlı başlatma (mevcut durum)
 
 ```bash
-# 1. Backend
-cd "Vita Porta"
-python -m uvicorn backend_api.app.main:app --reload
+# Bağımlılıklar (mediapipe 0.10.18 pinli — kritik)
+pip install -e ".[dev]"
 
-# 2. Frontend (ayrı terminal)
-cd "Vita Porta/frontend"
-npm run dev
+# Testler
+python -m pytest                                # 27/27 pass
 
-# 3. Tarayıcı
-http://127.0.0.1:3000
-# "Üçünü sırayla oynat" → kırmızı/sarı/yeşil canlı görünür
+# Backend (terminal 1)
+python -m uvicorn backend_api.app.main:app --reload --host 127.0.0.1 --port 8000
+
+# Frontend (terminal 2)
+cd frontend && npm install && npm run dev
+
+# Gateway runner (terminal 3) — gerçek webcam → backend → dashboard
+python -m gateway_agents.runner --webcam 0 --window 3.0
+
+# veya test videosu üzerinden:
+python -m gateway_agents.runner --video data/demo/red.mp4 --loop
+
+# veya MQTT (ESP32-CAM hazır olduğunda):
+python -m gateway_agents.runner --mqtt
 ```
+
+İlk açılışta hemşire giriş ekranı çıkar (Ad / Soyad / Hastane). localStorage'da hatırlanır, bir sonraki ziyarette doğrudan dashboard gelir. Sağ üstteki "Çıkış" ile oturum sonlandırılır.
 
 ---
 
 ## Mimari özet (mevcut)
 
 ```
-[mock demo bundle] ──► FastAPI /api/triage/demo
+Webcam / ESP32-CAM ──► AnalysisWindow (3sn pencere)
+                              │
+                              │ paralel
+                              ▼
+            [Gait | Skin | Respiration | Thermal | Expression]
+                              │
+                              │ AgentBundle (5 ajan)
+                              ▼
+                FastAPI /api/triage/run
                               │
                               ▼
                        EventBus (asyncio)
@@ -274,27 +263,29 @@ http://127.0.0.1:3000
                 (LangGraph)              │
                  │      │                ▼
                  ▼      ▼          Next.js dashboard
-            LLM     RAG (in-mem)
+            LLM     RAG (in-mem)   (hemşire girişli)
           (mock /
          anthropic /
           openai)
 ```
 
-**Faz 5 tamamlanınca:**
-```
-Webcam ──► AnalysisWindow ──► [Gait | Skin | Resp] ──► FastAPI /api/triage/run
-```
+---
 
-**Faz 6 tamamlanınca:**
-```
-ESP32-CAM ──MQTT──► Gateway ──► (yukarıdaki akış)
-```
+## Açık takipler (Faz 5 dışı, ilerleyen turlara)
+
+- **Backend `/api/triage/feedback` endpoint'i** — hemşire Onayla/Reddet/Değiştir verdict'leri şu an sadece tarayıcı belleğinde. UI hazır, sadece HTTP wiring + ChromaDB persistance gerekiyor. Supervisor öğrenmesi bu veriyi kullanacak.
+- **3sn "Analiz ediliyor…" pencere animasyonu** — observation→decision arası halka, demo wow-factor için planlıydı.
+- **Termal `ThermalSource`** — MLX90640/FLIR Lepton bağlanırsa proxy modundan çıkış adapter'ı.
+- **Eğitilmiş ağrı/mimik modeli** — expression ajanı geometrik proxy modunda; PSPI veya DeepFace pain model pilot fazına bırakıldı.
 
 ---
 
-## Notlar / Karar geçmişi
+## Karar geçmişi
 
-- **Middle-out yaklaşım** seçildi (NotebookLM tavsiyesi): önce supervisor + mock veriyle çalışan tam akış, sonra gerçek ajanlar takarken yerine geçer.
+- **Middle-out yaklaşım** (NotebookLM tavsiyesi): önce supervisor + mock veriyle çalışan tam akış, sonra gerçek ajanlar takarken yerine geçer.
 - **Provider-agnostic LLM**: env değişikliği ile Anthropic/OpenAI/Mock arasında geçiş. Production fallback (mock) teknik raporun "LLM kesintisi → kural tabanlı yedek" gereksinimini karşılar.
 - **In-memory RAG** hackathon hızı için default; ChromaRetriever sınıfı yazıldı, sadece env ile etkinleşiyor.
-- **Frontend tek bağımlılık dalında** kuruldu — shadcn/ui tam paket yerine Tailwind + lucide-react yeterli görüldü (boyut ve hız için).
+- **Frontend tek bağımlılık dalında** kuruldu — shadcn/ui tam paket yerine Tailwind + lucide-react yeterli görüldü.
+- **Expression ajanı geometrik proxy modu**: Eğitilmiş PSPI classifier yerine MediaPipe Face Mesh + kural-tabanlı analiz. Hackathon için hızlı, deterministik, açıklanabilir. Confidence ≤0.55 ile transparanlık sağlandı.
+- **Webcam fallback**: Hackathon jürisine ESP32-CAM olmadan canlı demo → risk azaltma.
+- **Hemşire oturumu sadece istemci tarafında (localStorage)**: KVKK uyumluluğu için ad-soyad ve hastane verisi backend'e gönderilmez; sistem zaten anonim triaj amaçlı.

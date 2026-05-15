@@ -1,8 +1,10 @@
 "use client";
 
 import { cn } from "@/lib/cn";
-import { ShieldCheck } from "lucide-react";
+import { displayName } from "@/lib/session";
+import { Building2, LogOut, ShieldCheck, User } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useNurseSession } from "./SessionGate";
 import type { ConnectionStatus } from "./useTriageStream";
 
 type PillState = "live" | "warn" | "off";
@@ -20,6 +22,7 @@ export interface HeaderProps {
 }
 
 export function Header({ apiStatus, lastObservationAt, lastDecisionLatencyMs }: HeaderProps) {
+  const { session, logout } = useNurseSession();
   const camState = useCameraState(lastObservationAt);
   const apiState = mapApiState(apiStatus);
   const llmState = mapLlmState(lastDecisionLatencyMs);
@@ -37,8 +40,16 @@ export function Header({ apiStatus, lastObservationAt, lastDecisionLatencyMs }: 
           <h1 className="text-3xl font-semibold text-slate-900 tracking-tight leading-none">
             Vita Porta
           </h1>
-          <p className="text-sm text-slate-500 mt-1.5">
-            Hemşire triaj asistanı · Sistem öneridir, son karar hemşireye aittir
+          <p className="text-sm text-slate-500 mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="inline-flex items-center gap-1">
+              <User className="w-3.5 h-3.5 text-slate-400" />
+              <span className="font-medium text-slate-700">{displayName(session)}</span>
+            </span>
+            <span className="text-slate-300">·</span>
+            <span className="inline-flex items-center gap-1">
+              <Building2 className="w-3.5 h-3.5 text-slate-400" />
+              <span>{session.hospital}</span>
+            </span>
           </p>
         </div>
       </div>
@@ -48,6 +59,16 @@ export function Header({ apiStatus, lastObservationAt, lastDecisionLatencyMs }: 
         <StatusPill state={apiState} label={apiLabel} />
         <StatusPill state={llmState} label={llmLabel} />
         <LiveClock />
+        <button
+          type="button"
+          onClick={logout}
+          aria-label="Çıkış"
+          title="Hemşire oturumunu sonlandır"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/80 border border-slate-200/70 shadow-sm text-xs font-medium uppercase tracking-wider text-slate-500 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-colors"
+        >
+          <LogOut className="w-3.5 h-3.5" strokeWidth={2.2} />
+          Çıkış
+        </button>
       </div>
     </header>
   );

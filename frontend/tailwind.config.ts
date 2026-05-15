@@ -44,6 +44,10 @@ const config: Config = {
       animation: {
         pulseRing: "pulseRing 2s ease-in-out infinite",
         statusGlow: "statusGlow 2.4s ease-in-out infinite",
+        lineFlow: "lineFlow 1.8s linear infinite",
+        silhouettePulse: "silhouettePulse 3s ease-in-out infinite",
+        silhouetteSway: "silhouetteSway 2.2s ease-in-out infinite",
+        chestBreathe: "chestBreathe 3s ease-in-out infinite",
       },
       keyframes: {
         pulseRing: {
@@ -53,6 +57,22 @@ const config: Config = {
         statusGlow: {
           "0%, 100%": { boxShadow: "0 0 0 0 rgba(16, 185, 129, 0.45)" },
           "50%": { boxShadow: "0 0 0 6px rgba(16, 185, 129, 0)" },
+        },
+        lineFlow: {
+          "0%": { strokeDashoffset: "0" },
+          "100%": { strokeDashoffset: "-7" },
+        },
+        silhouettePulse: {
+          "0%, 100%": { transform: "scale(1)", opacity: "0.18" },
+          "50%": { transform: "scale(1.08)", opacity: "0.42" },
+        },
+        silhouetteSway: {
+          "0%, 100%": { transform: "rotate(-1.5deg)" },
+          "50%": { transform: "rotate(1.5deg)" },
+        },
+        chestBreathe: {
+          "0%, 100%": { strokeWidth: "0.7" },
+          "50%": { strokeWidth: "1.1" },
         },
       },
     },
