@@ -1,7 +1,13 @@
 "use client";
 
-import { fetchHistory, postFeedback, streamUrl } from "@/lib/api";
-import type { AgentObservation, NurseFeedback, TriageCategory, TriageDecision } from "@/lib/types";
+import { fetchHistory, postFeedback, resetHistory as resetHistoryApi, streamUrl } from "@/lib/api";
+import type {
+  AgentObservation,
+  DecisionRecord,
+  NurseFeedback,
+  TriageCategory,
+  TriageDecision,
+} from "@/lib/types";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type Verdict } from "./NurseVerdict";
 import { useNurseSession } from "./SessionGate";
@@ -41,6 +47,7 @@ export interface StreamSnapshot {
   verdicts: Record<string, Verdict>;
   verdictNurses: Record<string, NurseMeta>;
   setVerdict: (key: string, verdict: Verdict) => void;
+  resetHistory: () => Promise<void>;
   lastObservationAt: number | null;
   lastDecisionLatencyMs: number | null;
 }
@@ -71,54 +78,76 @@ export function useTriageStream(): StreamSnapshot {
   // Son verdict'in kararı için snapshot — Auto-POST aramasında kullanılır.
   const decisionByKeyRef = useRef<Record<string, { decision: TriageDecision; obs: Observations }>>({});
 
-  // ---- Mount: backend'den geçmiş feedback'leri restore et -------------------
+  // ---- Mount: backend'den tüm karar + feedback kayıtlarını restore et ------
   useEffect(() => {
     let cancelled = false;
-    fetchHistory()
-      .then((records) => {
-        if (cancelled) return;
-        const restoredEntries: HistoryEntry[] = [];
-        const restoredVerdicts: Record<string, Verdict> = {};
-        const restoredNurses: Record<string, NurseMeta> = {};
-
-        for (const fb of records) {
-          const verdict = feedbackToVerdict(fb);
-          restoredVerdicts[fb.decision_id] = verdict;
-          restoredNurses[fb.decision_id] = {
-            firstName: fb.nurse_first_name,
-            lastName: fb.nurse_last_name,
-            hospital: fb.hospital,
-            feedbackAt: fb.feedback_at,
-          };
-
-          if (!seenKeysRef.current.has(fb.decision_id)) {
-            seenKeysRef.current.add(fb.decision_id);
-            restoredEntries.push({
-              key: fb.decision_id,
-              patientId: fb.patient_id,
-              decision: reconstructDecisionFromFeedback(fb),
-              observations: (fb.observations_snapshot ?? {}) as Observations,
-              restored: true,
-            });
-          }
-        }
-
-        restoredEntries.sort(
-          (a, b) =>
-            new Date(b.decision.decided_at).getTime() - new Date(a.decision.decided_at).getTime(),
-        );
-
-        setHistory((prev) => [...prev, ...restoredEntries]);
-        setVerdicts((prev) => ({ ...restoredVerdicts, ...prev }));
-        setVerdictNurses((prev) => ({ ...restoredNurses, ...prev }));
-      })
-      .catch((err) => {
-        console.warn("[useTriageStream] history restore başarısız:", err);
-      });
+    void restoreHistoryFromBackend(cancelled);
     return () => {
       cancelled = true;
     };
+    // restoreHistoryFromBackend stable; bağımlılık eklenmesine gerek yok.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function restoreHistoryFromBackend(cancelled: boolean): Promise<void> {
+    try {
+      const { decisions, feedback } = await fetchHistory();
+      if (cancelled) return;
+
+      // 1) Tüm kararları (verdict olsun olmasın) entry olarak yükle
+      const restoredEntries: HistoryEntry[] = [];
+      for (const rec of decisions) {
+        if (seenKeysRef.current.has(rec.decision_id)) continue;
+        seenKeysRef.current.add(rec.decision_id);
+        decisionByKeyRef.current[rec.decision_id] = {
+          decision: rec.decision,
+          obs: rec.observations_snapshot as Observations,
+        };
+        restoredEntries.push({
+          key: rec.decision_id,
+          patientId: rec.patient_id,
+          decision: rec.decision,
+          observations: rec.observations_snapshot as Observations,
+          restored: true,
+        });
+      }
+
+      // 2) Feedback kayıtlarını verdict + nurse meta'ya bağla; karar entry'si
+      //    decisions listesinde yoksa (eski feedback'ler için) reconstruct et.
+      const restoredVerdicts: Record<string, Verdict> = {};
+      const restoredNurses: Record<string, NurseMeta> = {};
+      for (const fb of feedback) {
+        restoredVerdicts[fb.decision_id] = feedbackToVerdict(fb);
+        restoredNurses[fb.decision_id] = {
+          firstName: fb.nurse_first_name,
+          lastName: fb.nurse_last_name,
+          hospital: fb.hospital,
+          feedbackAt: fb.feedback_at,
+        };
+        if (!seenKeysRef.current.has(fb.decision_id)) {
+          seenKeysRef.current.add(fb.decision_id);
+          restoredEntries.push({
+            key: fb.decision_id,
+            patientId: fb.patient_id,
+            decision: reconstructDecisionFromFeedback(fb),
+            observations: (fb.observations_snapshot ?? {}) as Observations,
+            restored: true,
+          });
+        }
+      }
+
+      restoredEntries.sort(
+        (a, b) =>
+          new Date(b.decision.decided_at).getTime() - new Date(a.decision.decided_at).getTime(),
+      );
+
+      setHistory((prev) => [...prev, ...restoredEntries]);
+      setVerdicts((prev) => ({ ...restoredVerdicts, ...prev }));
+      setVerdictNurses((prev) => ({ ...restoredNurses, ...prev }));
+    } catch (err) {
+      console.warn("[useTriageStream] history restore başarısız:", err);
+    }
+  }
 
   // ---- SSE kanalı -----------------------------------------------------------
   useEffect(() => {
@@ -266,6 +295,22 @@ export function useTriageStream(): StreamSnapshot {
     return entry ? { decision: entry.decision, obs: entry.observations } : null;
   }
 
+  const resetHistory = useCallback(async () => {
+    try {
+      await resetHistoryApi();
+    } catch (err) {
+      console.warn("[useTriageStream] resetHistory başarısız:", err);
+      throw err;
+    }
+    // Backend temizlendi — local state'i de sıfırla. Mevcut hasta görünümü
+    // (current) korunabilir; sadece geçmiş listesi ve verdict map'leri silinir.
+    seenKeysRef.current = new Set();
+    decisionByKeyRef.current = {};
+    setHistory([]);
+    setVerdicts({});
+    setVerdictNurses({});
+  }, []);
+
   return {
     status,
     current,
@@ -273,6 +318,7 @@ export function useTriageStream(): StreamSnapshot {
     verdicts,
     verdictNurses,
     setVerdict,
+    resetHistory,
     lastObservationAt,
     lastDecisionLatencyMs,
   };

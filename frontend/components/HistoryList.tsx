@@ -4,7 +4,9 @@ import { cn } from "@/lib/cn";
 import { useNurseSession } from "./SessionGate";
 import { verdictColorClass, verdictIcon, type Verdict } from "./NurseVerdict";
 import type { HistoryEntry, NurseMeta } from "./useTriageStream";
-import { UserCog } from "lucide-react";
+import { Trash2, UserCog } from "lucide-react";
+import { useState } from "react";
+import { ResetConfirmDialog } from "./ResetConfirmDialog";
 
 const DOT: Record<HistoryEntry["decision"]["category"], string> = {
   red: "bg-triage-red",
@@ -19,6 +21,7 @@ export interface HistoryListProps {
   verdictNurses: Record<string, NurseMeta>;
   selectedKey: string | null;
   onSelect: (key: string) => void;
+  onReset: () => Promise<void> | void;
 }
 
 export function HistoryList({
@@ -27,15 +30,32 @@ export function HistoryList({
   verdictNurses,
   selectedKey,
   onSelect,
+  onReset,
 }: HistoryListProps) {
   const { session } = useNurseSession();
   const currentNurseKey = `${session.firstName.toLowerCase()}|${session.lastName.toLowerCase()}|${session.hospital.toLowerCase()}`;
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const handleConfirm = async () => {
+    try {
+      await onReset();
+    } finally {
+      setConfirmOpen(false);
+    }
+  };
 
   if (history.length === 0) {
     return (
-      <div className="rounded-3xl bg-white/70 backdrop-blur-xl border border-white/60 shadow-glass p-5 text-sm text-slate-400">
-        Henüz triaj kararı yok.
-      </div>
+      <>
+        <div className="rounded-3xl bg-white/70 backdrop-blur-xl border border-white/60 shadow-glass p-5 text-sm text-slate-400">
+          Henüz triaj kararı yok.
+        </div>
+        <ResetConfirmDialog
+          open={confirmOpen}
+          onCancel={() => setConfirmOpen(false)}
+          onConfirm={handleConfirm}
+        />
+      </>
     );
   }
 
@@ -59,12 +79,29 @@ export function HistoryList({
 
   return (
     <div className="rounded-3xl bg-white/70 backdrop-blur-xl border border-white/60 shadow-glass overflow-hidden">
-      <div className="px-5 py-3 border-b border-slate-200/60 flex items-baseline justify-between">
+      <div className="px-5 py-3 border-b border-slate-200/60 flex items-center justify-between gap-2">
         <span className="text-xs uppercase tracking-wider text-slate-500 font-medium">
           Son kararlar
         </span>
-        <span className="text-[11px] text-slate-400 tabular-nums">{history.length}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-slate-400 tabular-nums">{history.length}</span>
+          <button
+            type="button"
+            onClick={() => setConfirmOpen(true)}
+            aria-label="Geçmişi sıfırla"
+            title="Tüm geçmiş kararları ve verdict'leri kalıcı olarak sil"
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] uppercase tracking-wider text-slate-500 hover:bg-rose-50 hover:text-rose-600 transition-colors"
+          >
+            <Trash2 className="w-3 h-3" strokeWidth={2.2} />
+            Sıfırla
+          </button>
+        </div>
       </div>
+      <ResetConfirmDialog
+        open={confirmOpen}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={handleConfirm}
+      />
       <ul className="divide-y divide-slate-200/40 max-h-[480px] overflow-y-auto">
         {items.map((item, idx) => {
           if (item.kind === "shift") {

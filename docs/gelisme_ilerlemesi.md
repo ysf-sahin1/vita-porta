@@ -2,7 +2,7 @@
 
 Bu dosya geliştirme oturumlarının kaldığı yerden devam edebilmesi için tutulur. Her faz: durum, neyin tamamlandığı, neyin kaldığı, ilgili dosyalar ve doğrulama yöntemi.
 
-**Genel durum:** 7.5/8 faz tamamlandı + **Faz 4.5 (Frontend yenileme)** + **Faz 4.6 (login + radyal)** + **Faz 5 tamamen kapandı** (5 ajan) + **Faz 5.7 (verdict persistance + mesai history + RAG deneyim katmanı)** tamamlandı (2026-05-16). Sistem **gerçek webcam'den canlı çalışıyor**: **5 görsel ajan** (yürüyüş, ten rengi, solunum, termal, yüz ifadesi) paralel işliyor, supervisor RAG + geçmiş hemşire kararları ile karar üretiyor, dashboard SSE ile yayınlıyor. Hemşire ✓/✗/✎ verdict'leri kalıcı kaydediliyor (JSON store, `.feedback/feedbacks.jsonl`) — sayfa yenilense, hemşire değişse, oturum kapansa bile veri kaybolmuyor. Yeni vaka geldiğinde benzer sinyalli geçmiş hemşire kararı bağlam olarak supervisor'a giriyor ve UI'da görünüyor. Kalan: edge firmware + Docker compose (Faz 6) ve pitch polish (Faz 8).
+**Genel durum:** 7.5/8 faz tamamlandı + **Faz 4.5 (Frontend yenileme)** + **Faz 4.6 (login + radyal)** + **Faz 5 tamamen kapandı** (5 ajan) + **Faz 5.7 (verdict persistance + mesai history + RAG deneyim katmanı)** + **Faz 5.8 (tüm kararların kalıcı kaydı + sıfırlama akışı)** tamamlandı (2026-05-16). Sistem **gerçek webcam'den canlı çalışıyor**: **5 görsel ajan** (yürüyüş, ten rengi, solunum, termal, yüz ifadesi) paralel işliyor, supervisor RAG + geçmiş hemşire kararları ile karar üretiyor, dashboard SSE ile yayınlıyor. **Tüm triaj kararları kalıcı kaydediliyor** (`.decisions/decisions.jsonl`); hemşire ✓/✗/✎ verdict'leri ayrı bir store'da (`.feedback/feedbacks.jsonl`). Sayfa yenilense, hemşire değişse, oturum kapansa bile **hem genel hasta listesi hem de verdict'ler korunuyor**; istenirse "Sıfırla" butonu ile her ikisi de kalıcı olarak silinebiliyor. Yeni vaka geldiğinde benzer sinyalli geçmiş hemşire kararı bağlam olarak supervisor'a giriyor ve UI'da görünüyor. Kalan: edge firmware + Docker compose (Faz 6) ve pitch polish (Faz 8).
 
 **NotebookLM bağlantısı:** Notebook ID `d9854800-b703-4b71-919f-6121bb3e05d8`. Proje bağlamı her oturumda NotebookLM'den çekilir.
 
@@ -107,6 +107,94 @@ Bu dosya geliştirme oturumlarının kaldığı yerden devam edebilmesi için tu
 **Doğrulama:**
 - `python -m pytest gateway_agents/tests orchestration/tests -v` → **11/11 PASS**.
 - Webcam runner canlı çalıştı: backend'e POST, dashboard'da kararlar göründü (2026-05-13 oturumu).
+
+## Faz 5.8 — Tüm kararların kalıcı kaydı + Sıfırlama akışı · ✅ Tamamlandı (2026-05-16)
+
+**Bağlam:** Faz 5.7'de hemşire verdict'leri kalıcı hale geldi ama **verdict verilmemiş kararlar** hâlâ uçuyordu — sayfa yenilenince sadece ✓/✗/✎ yapılan vakalar geri geliyordu, geri kalan triaj kararları yok oluyordu. Aynı zamanda eski test verilerini temizlemek için bir yol yoktu. Bu turda iki şey eklendi:
+
+1. **DecisionRecord store** — Her triaj kararı (verdict olsun olmasın) `.decisions/decisions.jsonl`'a yazılır.
+2. **Sıfırlama akışı** — Header'sız, HistoryList üst başlığa "Sıfırla" linki + onay modal; backend `DELETE /api/triage/history` her iki dosyayı (decisions + feedback) temizler.
+
+**Backend yeni dosyalar (1):**
+- `orchestration/decisions_store.py` — `DecisionStore` Protocol + `JsonDecisionStore`:
+  - Append-only `.decisions/decisions.jsonl`, thread-safe lock
+  - `save(record)`, `list_all()` (decision_id başına son kayıt), `clear()` (dosyayı siler)
+  - `FeedbackStore` ile birebir paralel yapı
+
+**Backend güncellenen dosyalar (3):**
+- `orchestration/schemas.py` — Yeni `DecisionRecord` model (decision_id, patient_id, decision, observations_snapshot).
+- `orchestration/feedback_store.py` — `FeedbackStore` protocol'üne `clear()` eklendi, `JsonFeedbackStore.clear()` implementasyonu.
+- `backend_api/app/main.py`:
+  - Lifespan'da `decisions_store = build_default_decision_store()`
+  - `_persist_decision(app, bundle, decision)` helper — `run_triage` ve `demo_triage` her decision üretildiğinde çağırır (observation snapshot da iliştirilir)
+  - `GET /api/triage/history` shape değişti: artık `{decisions: list[DecisionRecord], feedback: list[NurseFeedback]}` döner
+  - `DELETE /api/triage/history` (204 No Content) — her iki store'u `clear()` eder, geri alınamaz
+
+**Frontend yeni dosyalar (1):**
+- `frontend/components/ResetConfirmDialog.tsx` — Glassmorphism onay modalı (`AlertTriangle` ikonu, rose-50 vurgulu, "İptal" + "Evet, sıfırla" butonları). Escape / backdrop click ile kapanır, body scroll lock, busy state ("Siliniyor…").
+
+**Frontend güncellenen dosyalar (4):**
+- `frontend/lib/types.ts` — `DecisionRecord` ve `HistoryResponse` interface'leri.
+- `frontend/lib/api.ts` — `fetchHistory()` artık `HistoryResponse` döner; yeni `resetHistory()` (DELETE).
+- `frontend/components/useTriageStream.ts`:
+  - `restoreHistoryFromBackend()` artık iki listeyi merge ediyor: önce decisions (tüm kararlar entry olarak), sonra feedbacks (verdict + nurse meta + decisions'da olmayan eski feedback'ler için entry reconstruct fallback).
+  - `decisionByKeyRef` artık restore'dan da popüle ediliyor (verdict POST'unda snapshot her zaman mevcut).
+  - Yeni `resetHistory` action expose'lu: backend DELETE çağırır, local state'i tertemiz sıfırlar (history boşalır, verdict map'leri silinir, current görünüm korunur).
+- `frontend/components/HistoryList.tsx`:
+  - Yeni `onReset` prop'u + lokal `confirmOpen` state.
+  - Üst başlıkta "Sıfırla" butonu (Trash2 ikonu, hover'da rose-50). Tıklayınca `ResetConfirmDialog` açılır.
+  - Boş history durumunda da dialog render'lanır (modal görünebilir).
+- `frontend/app/page.tsx`:
+  - `resetHistory` hook'tan alınıyor, `HistoryList`'e `onReset` olarak iletiliyor.
+  - Reset sonrası `setSelectedKey(null)` (varsa modal seçimi temizlenir).
+
+**`.gitignore`** — `.decisions/` (zaten `.feedback/` vardı; `.decisions/` da eklendi).
+
+**Veri akışı:**
+
+```
+Demo butonu / webcam runner → POST /api/triage/run
+   ↓
+Supervisor.decide() → TriageDecision
+   ↓
+SSE'ye gönder + _persist_decision() →
+   DecisionRecord (.decisions/decisions.jsonl)
+
+Hemşire ✓/✗/✎ → POST /api/triage/feedback
+   ↓
+NurseFeedback (.feedback/feedbacks.jsonl)
+
+Sayfa yenile → GET /api/triage/history
+   ↓
+{decisions, feedback}
+   ↓
+useTriageStream restore:
+   - Tüm kararlar (verdict olsun olmasın) entry olarak yüklenir
+   - Verdict olanlara nurse meta + verdict badge eklenir
+
+Hemşire "Sıfırla" → onay modalı → DELETE /api/triage/history
+   ↓
+JsonDecisionStore.clear() + JsonFeedbackStore.clear()
+   ↓
+useTriageStream.resetHistory():
+   seenKeysRef = new Set(), decisionByKey = {},
+   history = [], verdicts = {}, verdictNurses = {}
+```
+
+**Doğrulama:**
+- `python -m pytest gateway_agents/tests orchestration/tests -v` → **27/27 PASS**
+- `npx tsc --noEmit` → clean
+- Backend curl round-trip:
+  - `POST /api/triage/demo?scenario=yellow` → 200
+  - `GET /api/triage/history` → `{decisions: [...1 kayıt], feedback: [...]}`
+  - `DELETE /api/triage/history` → 204
+  - `GET /api/triage/history` → `{decisions: [], feedback: []}`
+- Frontend canlı: demo butonu → verdict vermeden hard refresh (Cmd+Shift+R) → karar history'de kalır (· geçmiş rozetiyle); "Sıfırla" → onay modalı → "Evet, sıfırla" → her şey siler; reset sonrası demo butonu → temiz state'le yeniden başlar.
+
+**Açık takipler:**
+- Reset onayı için yazılı tip-doğrulama (örn. "SİL" yazma) hackathon için fazla; modal yeterince blocking.
+- Bulk-undo (sıfırlama sonrası geri al) yok — istenirse `.decisions/.bak` + `.feedback/.bak` yedeği alınabilir; şimdilik kapsam dışı.
+- Reset butonu sadece HistoryList'te; gerekli olursa Header'a da küçük bir ikon eklenebilir, ama orası zaten dolu (kamera/API/LLM pilleri + saat + çıkış).
 
 ## Faz 5.7 — Verdict persistance + Mesai history + RAG deneyim katmanı · ✅ Tamamlandı (2026-05-16)
 

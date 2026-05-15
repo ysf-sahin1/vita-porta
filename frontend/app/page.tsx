@@ -30,6 +30,7 @@ function Dashboard() {
     verdicts,
     verdictNurses,
     setVerdict,
+    resetHistory,
     lastObservationAt,
     lastDecisionLatencyMs,
   } = useTriageStream();
@@ -94,6 +95,10 @@ function Dashboard() {
             verdictNurses={verdictNurses}
             selectedKey={selectedKey}
             onSelect={(k) => setSelectedKey(k)}
+            onReset={async () => {
+              await resetHistory();
+              setSelectedKey(null);
+            }}
           />
         </aside>
       </div>

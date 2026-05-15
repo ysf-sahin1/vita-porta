@@ -48,6 +48,18 @@ export interface NurseFeedback {
   feedback_at: string;
 }
 
+export interface DecisionRecord {
+  decision_id: string;
+  patient_id: string;
+  decision: TriageDecision;
+  observations_snapshot: Record<string, AgentObservation>;
+}
+
+export interface HistoryResponse {
+  decisions: DecisionRecord[];
+  feedback: NurseFeedback[];
+}
+
 export type TriageEvent =
   | { type: "agent_observation"; patient_id: string; observation: AgentObservation; emitted_at: string }
   | { type: "decision"; patient_id: string; decision: TriageDecision; emitted_at: string }

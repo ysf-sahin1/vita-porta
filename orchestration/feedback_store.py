@@ -32,6 +32,7 @@ class FeedbackStore(Protocol):
     def save(self, feedback: NurseFeedback) -> None: ...
     def list_all(self) -> list[NurseFeedback]: ...
     def query_similar(self, signals_text: str, *, k: int = 3) -> list[HistoricalFeedback]: ...
+    def clear(self) -> None: ...
 
 
 class JsonFeedbackStore:
@@ -77,6 +78,13 @@ class JsonFeedbackStore:
                         latest[record.decision_id] = record
 
         return sorted(latest.values(), key=lambda r: r.feedback_at, reverse=True)
+
+    def clear(self) -> None:
+        """Tüm hemşire feedback'lerini siler. Geri alınamaz."""
+
+        with self._lock:
+            if self._path.exists():
+                self._path.unlink()
 
     def query_similar(self, signals_text: str, *, k: int = 3) -> list[HistoricalFeedback]:
         """Token-overlap scoring — RAG retriever'la aynı yaklaşım."""

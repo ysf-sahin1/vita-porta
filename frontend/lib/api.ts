@@ -1,4 +1,4 @@
-import type { NurseFeedback } from "./types";
+import type { HistoryResponse, NurseFeedback } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
@@ -21,8 +21,15 @@ export async function postFeedback(feedback: NurseFeedback): Promise<void> {
   if (!res.ok) throw new Error(`feedback kaydedilemedi (${res.status})`);
 }
 
-export async function fetchHistory(): Promise<NurseFeedback[]> {
+export async function fetchHistory(): Promise<HistoryResponse> {
   const res = await fetch(`${API_BASE}/api/triage/history`);
   if (!res.ok) throw new Error(`history alınamadı (${res.status})`);
   return res.json();
+}
+
+export async function resetHistory(): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/triage/history`, { method: "DELETE" });
+  if (!res.ok && res.status !== 204) {
+    throw new Error(`geçmiş sıfırlanamadı (${res.status})`);
+  }
 }

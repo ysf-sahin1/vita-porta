@@ -130,6 +130,20 @@ class TriageDecision(BaseModel):
         )
 
 
+class DecisionRecord(BaseModel):
+    """Bir kararın verdict-bağımsız kalıcı kaydı.
+
+    Hemşire henüz ✓/✗/✎ yapmamış olsa bile karar `decisions_store`'a yazılır.
+    Frontend yenilendiğinde bu kayıtlar + feedback kayıtları birleştirilip
+    history reconstruct edilir.
+    """
+
+    decision_id: str
+    patient_id: str
+    decision: TriageDecision
+    observations_snapshot: dict[str, AgentObservation] = Field(default_factory=dict)
+
+
 class NurseFeedback(BaseModel):
     """Hemşire bir karara verdik verdiğinde oluşan kalıcı kayıt.
 
