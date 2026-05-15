@@ -28,6 +28,7 @@ function Dashboard() {
     current,
     history,
     verdicts,
+    verdictNurses,
     setVerdict,
     lastObservationAt,
     lastDecisionLatencyMs,
@@ -53,6 +54,7 @@ function Dashboard() {
   const selectedEntry =
     selectedKey !== null ? history.find((h) => h.key === selectedKey) ?? null : null;
   const selectedVerdict = selectedKey !== null ? verdicts[selectedKey] ?? null : null;
+  const selectedNurse = selectedKey !== null ? verdictNurses[selectedKey] ?? null : null;
 
   return (
     <main className="max-w-[1400px] mx-auto px-4 md:px-8 py-6 md:py-8 space-y-6">
@@ -89,6 +91,7 @@ function Dashboard() {
           <HistoryList
             history={history}
             verdicts={verdicts}
+            verdictNurses={verdictNurses}
             selectedKey={selectedKey}
             onSelect={(k) => setSelectedKey(k)}
           />
@@ -114,6 +117,7 @@ function Dashboard() {
       <HistoryDetailModal
         entry={selectedEntry}
         verdict={selectedVerdict}
+        nurse={selectedNurse}
         onVerdictChange={selectedKey ? handleVerdict(selectedKey) : () => {}}
         onClose={() => setSelectedKey(null)}
       />

@@ -21,7 +21,8 @@ from sse_starlette.sse import EventSourceResponse
 
 from backend_api.app.event_bus import EventBus
 from orchestration.demo import ambiguous_case, critical_case, stable_case
-from orchestration.schemas import AgentBundle, TriageEvent
+from orchestration.feedback_store import build_default_store
+from orchestration.schemas import AgentBundle, NurseFeedback, TriageEvent
 from orchestration.supervisor import Supervisor
 
 logger = logging.getLogger("vita_porta")
@@ -31,7 +32,8 @@ logging.basicConfig(level=logging.INFO)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.event_bus = EventBus()
-    app.state.supervisor = Supervisor()
+    app.state.feedback_store = build_default_store()
+    app.state.supervisor = Supervisor(feedback_store=app.state.feedback_store)
     logger.info("Vita Porta backend hazır.")
     yield
 
@@ -83,6 +85,32 @@ async def stream_triage():
             }
 
     return EventSourceResponse(event_source())
+
+
+@app.post("/api/triage/feedback")
+async def submit_feedback(feedback: NurseFeedback) -> dict:
+    """Hemşire ✓/✗/✎ verdiğinde çağrılır — JSON store'a kalıcı kayıt."""
+
+    store = app.state.feedback_store
+    store.save(feedback)
+    logger.info(
+        "Feedback kaydedildi: decision=%s hemşire=%s %s verdict=%s (%s)",
+        feedback.decision_id,
+        feedback.nurse_first_name,
+        feedback.nurse_last_name,
+        feedback.nurse_verdict.value,
+        feedback.verdict_kind,
+    )
+    return {"saved": True, "decision_id": feedback.decision_id}
+
+
+@app.get("/api/triage/history")
+async def list_feedback() -> list[dict]:
+    """Frontend ilk yüklemede çağırır — tüm geçmiş verdict'ler döner."""
+
+    store = app.state.feedback_store
+    records = store.list_all()
+    return [r.model_dump(mode="json") for r in records]
 
 
 @app.post("/api/triage/demo")

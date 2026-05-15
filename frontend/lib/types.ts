@@ -8,6 +8,17 @@ export interface AgentObservation {
   captured_at: string;
 }
 
+export interface HistoricalFeedback {
+  nurse_name: string;
+  hospital: string;
+  original_category: TriageCategory;
+  nurse_verdict: string;
+  verdict_kind: "approve" | "reject" | "override";
+  rationale_tr: string;
+  feedback_at: string;
+  similarity_score: number;
+}
+
 export interface TriageDecision {
   patient_id: string;
   category: TriageCategory;
@@ -16,8 +27,25 @@ export interface TriageDecision {
   confidence: number;
   per_agent_weights: Record<string, number>;
   rag_references: string[];
+  historical_feedback: HistoricalFeedback[];
   decided_at: string;
   latency_ms: number | null;
+}
+
+export interface NurseFeedback {
+  decision_id: string;
+  patient_id: string;
+  original_category: TriageCategory;
+  nurse_verdict: TriageCategory;
+  verdict_kind: "approve" | "reject" | "override";
+  rationale_tr: string;
+  nurse_first_name: string;
+  nurse_last_name: string;
+  hospital: string;
+  signals_summary: string;
+  observations_snapshot: Record<string, AgentObservation>;
+  decided_at: string;
+  feedback_at: string;
 }
 
 export type TriageEvent =

@@ -1,12 +1,13 @@
 "use client";
 
 import { cn } from "@/lib/cn";
-import type { TriageCategory, TriageDecision } from "@/lib/types";
+import type { HistoricalFeedback, TriageCategory, TriageDecision } from "@/lib/types";
 import {
   AlertTriangle,
   CheckCircle2,
   Clock3,
   HelpCircle,
+  History,
 } from "lucide-react";
 import { NurseVerdict, type Verdict } from "./NurseVerdict";
 import { Tooltip } from "./Tooltip";
@@ -129,6 +130,49 @@ export function TriageCard({ decision, verdict, onVerdictChange }: TriageCardPro
       </div>
 
       <NurseVerdict verdict={verdict} onChange={onVerdictChange} />
+
+      <HistoricalFeedbackBanner items={decision.historical_feedback ?? []} />
     </div>
   );
+}
+
+function HistoricalFeedbackBanner({ items }: { items: HistoricalFeedback[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="mt-4 rounded-2xl border border-sky-200/70 bg-sky-50/60 px-4 py-3">
+      <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-sky-800 font-medium mb-1.5">
+        <History className="w-3.5 h-3.5" strokeWidth={2.2} />
+        <span>Geçmiş hemşire deneyimleri</span>
+        <span className="ml-auto text-[10px] text-sky-700/70 tabular-nums">{items.length} kayıt</span>
+      </div>
+      <ul className="space-y-1.5">
+        {items.slice(0, 2).map((fb, i) => (
+          <li key={i} className="text-xs text-slate-700">
+            <span className="font-medium">{fb.nurse_name}</span>
+            <span className="text-slate-500">
+              {" "}
+              · benzer sinyalde <strong>{trCat(fb.original_category)}</strong> önerisini{" "}
+              {fb.verdict_kind === "approve" ? (
+                <em className="text-emerald-700">onaylamıştı</em>
+              ) : fb.verdict_kind === "reject" ? (
+                <em className="text-rose-700">reddetmişti</em>
+              ) : (
+                <>
+                  <em className="text-amber-700">{trCat(fb.nurse_verdict)}</em>'a çevirmişti
+                </>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function trCat(c: string): string {
+  if (c === "red") return "Kırmızı";
+  if (c === "yellow") return "Sarı";
+  if (c === "green") return "Yeşil";
+  if (c === "insufficient") return "Yetersiz";
+  return c;
 }

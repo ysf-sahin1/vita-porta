@@ -1,6 +1,6 @@
 # Vita Porta — Project Explorer & Health Analysis
 
-**Son güncelleme:** 2026-05-16 | **Proje durumu:** 7.5/8 faz tamamlandı (~94%)
+**Son güncelleme:** 2026-05-16 | **Proje durumu:** 7.5/8 faz + verdict persistance/RAG deneyim katmanı (~95%)
 
 ---
 
@@ -124,6 +124,7 @@ Vita Porta/
 | 5 | **5 görsel ajan** | ✅ | gait + skin + respiration + thermal + **expression** |
 | 5.5 | origin/main rewrite ile birleşme | ✅ | mertmrz → main, 27/27 pass |
 | 5.6 | Yüz İfadesi ajanı (Faz 5 kapanışı) | ✅ | MediaPipe Face Mesh, EAR + PSPI proxy |
+| **5.7** | **Verdict persistance + Mesai history + RAG deneyim** | ✅ | JSON store, FeedbackStore protocol, retrieve_feedback node, UI mesai marker'ları |
 | 7 | Uçtan uca canlı demo | ✅ | Webcam → 5 ajan → backend → dashboard |
 
 ---

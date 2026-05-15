@@ -72,6 +72,24 @@ class AgentBundle(BaseModel):
         return [obs for obs in candidates if obs is not None]
 
 
+class HistoricalFeedback(BaseModel):
+    """Geçmişten getirilen hemşire kararı — supervisor pipeline'da RAG yanında.
+
+    Yeni vaka geldiğinde, sinyaller benzer eski vakalara hemşirenin nasıl yanıt
+    verdiğini bağlam olarak ekler. Karar mercii hâlâ LLM + ESI; bu sadece
+    "geçmişte bu görünüm aldığında hemşire şöyle demişti" bilgisidir.
+    """
+
+    nurse_name: str
+    hospital: str
+    original_category: TriageCategory
+    nurse_verdict: str
+    verdict_kind: Literal["approve", "reject", "override"]
+    rationale_tr: str = ""
+    feedback_at: datetime
+    similarity_score: float = 0.0
+
+
 class TriageDecision(BaseModel):
     """Supervisor output rendered on the nurse dashboard."""
 
@@ -82,6 +100,7 @@ class TriageDecision(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     per_agent_weights: dict[str, float] = Field(default_factory=dict)
     rag_references: list[str] = Field(default_factory=list)
+    historical_feedback: list[HistoricalFeedback] = Field(default_factory=list)
     decided_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     latency_ms: int | None = None
 
@@ -95,6 +114,7 @@ class TriageDecision(BaseModel):
         confidence: float,
         per_agent_weights: dict[str, float] | None = None,
         rag_references: list[str] | None = None,
+        historical_feedback: list[HistoricalFeedback] | None = None,
         latency_ms: int | None = None,
     ) -> "TriageDecision":
         return cls(
@@ -105,7 +125,47 @@ class TriageDecision(BaseModel):
             confidence=confidence,
             per_agent_weights=per_agent_weights or {},
             rag_references=rag_references or [],
+            historical_feedback=historical_feedback or [],
             latency_ms=latency_ms,
+        )
+
+
+class NurseFeedback(BaseModel):
+    """Hemşire bir karara verdik verdiğinde oluşan kalıcı kayıt.
+
+    `decision_id` frontend'in `entryKey(patient_id, decided_at)` ile ürettiği
+    deterministic anahtar — aynı kararda birden fazla feedback verilirse
+    sonuncusu üstüne yazılabilir (UI tarafında bu kararla tek verdict
+    tutuluyor).
+    """
+
+    decision_id: str
+    patient_id: str
+    original_category: TriageCategory
+    nurse_verdict: TriageCategory
+    verdict_kind: Literal["approve", "reject", "override"]
+    rationale_tr: str = ""
+    nurse_first_name: str
+    nurse_last_name: str
+    hospital: str
+    signals_summary: str = Field(
+        default="",
+        description="Token-overlap RAG için ajan gözlemlerinin tek-string özeti.",
+    )
+    observations_snapshot: dict[str, AgentObservation] = Field(default_factory=dict)
+    decided_at: datetime
+    feedback_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def to_historical(self, *, similarity_score: float = 0.0) -> HistoricalFeedback:
+        return HistoricalFeedback(
+            nurse_name=f"{self.nurse_first_name} {self.nurse_last_name}".strip(),
+            hospital=self.hospital,
+            original_category=self.original_category,
+            nurse_verdict=self.nurse_verdict.value,
+            verdict_kind=self.verdict_kind,
+            rationale_tr=self.rationale_tr,
+            feedback_at=self.feedback_at,
+            similarity_score=similarity_score,
         )
 
 

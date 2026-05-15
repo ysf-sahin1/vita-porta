@@ -2,7 +2,7 @@
 
 Bu dosya geliştirme oturumlarının kaldığı yerden devam edebilmesi için tutulur. Her faz: durum, neyin tamamlandığı, neyin kaldığı, ilgili dosyalar ve doğrulama yöntemi.
 
-**Genel durum:** 7.5/8 faz tamamlandı + **Faz 4.5 (Frontend yenileme)** tamamlandı + **Faz 5 tamamen kapandı** (2026-05-16, 5. ajan eklendi). Sistem **gerçek webcam'den canlı çalışıyor**: **5 görsel ajan (yürüyüş, ten rengi, solunum, termal, yüz ifadesi)** paralel işliyor, supervisor karar üretiyor, dashboard SSE ile yayınlıyor. Frontend Health-OS stilinde komple yenilendi (`frontend-yenileme` branch, 2026-05-14): Inter font, glassmorphism, hemşire onay/red/değiştir akışı, history detay modal'ı, Türkçe sinyal etiketleri. 5. ajan (ExpressionAgent — MediaPipe Face Mesh ile ağrı/bilinç/asimetri) eklendiğinde frontend component entegrasyonu da yapıldı (AgentPanel 5'li grid, TriageCard 5 sütunlu per-agent ağırlık, HistoryDetailModal 5 ajan snapshot). **mertmrz branch'i ile origin/main (Yusuf'un Phase 5 rewrite'ı) birleştirildi ve tüm değişiklikler ana projeye (ysf-sahin1/vita-porta) push'landı** (2026-05-13). Kalan: edge firmware + Docker compose (Faz 6) ve pitch polish (Faz 8).
+**Genel durum:** 7.5/8 faz tamamlandı + **Faz 4.5 (Frontend yenileme)** + **Faz 4.6 (login + radyal)** + **Faz 5 tamamen kapandı** (5 ajan) + **Faz 5.7 (verdict persistance + mesai history + RAG deneyim katmanı)** tamamlandı (2026-05-16). Sistem **gerçek webcam'den canlı çalışıyor**: **5 görsel ajan** (yürüyüş, ten rengi, solunum, termal, yüz ifadesi) paralel işliyor, supervisor RAG + geçmiş hemşire kararları ile karar üretiyor, dashboard SSE ile yayınlıyor. Hemşire ✓/✗/✎ verdict'leri kalıcı kaydediliyor (JSON store, `.feedback/feedbacks.jsonl`) — sayfa yenilense, hemşire değişse, oturum kapansa bile veri kaybolmuyor. Yeni vaka geldiğinde benzer sinyalli geçmiş hemşire kararı bağlam olarak supervisor'a giriyor ve UI'da görünüyor. Kalan: edge firmware + Docker compose (Faz 6) ve pitch polish (Faz 8).
 
 **NotebookLM bağlantısı:** Notebook ID `d9854800-b703-4b71-919f-6121bb3e05d8`. Proje bağlamı her oturumda NotebookLM'den çekilir.
 
@@ -107,6 +107,128 @@ Bu dosya geliştirme oturumlarının kaldığı yerden devam edebilmesi için tu
 **Doğrulama:**
 - `python -m pytest gateway_agents/tests orchestration/tests -v` → **11/11 PASS**.
 - Webcam runner canlı çalıştı: backend'e POST, dashboard'da kararlar göründü (2026-05-13 oturumu).
+
+## Faz 5.7 — Verdict persistance + Mesai history + RAG deneyim katmanı · ✅ Tamamlandı (2026-05-16)
+
+**Bağlam:** Faz 4.5'te hemşire ✓/✗/✎ UI'ı tamamlandı ama veriler sadece tarayıcı belleğindeydi — sayfa yenileyince kayboluyor, çıkış yapınca eski kararlar yok oluyor. Aynı zamanda RAG sadece ESI seed vakalarına bakıyordu; geçmişte aynı hastanedeki hemşirenin benzer vakaya nasıl yanıt verdiği sisteme yansımıyordu. Bu turda 3 katman birden eklendi:
+
+1. **Verdict persistance** — JSON-tabanlı append-only store; backend reload veya sayfa yenileme veri kaybetmiyor.
+2. **Mesai history** — Her verdict'te hemşire bilgisi (ad/soyad/hastane/saat) saklanır; HistoryList'te mesai değişikliği görsel marker ile gösterilir, farklı hemşirenin kararları italik fontla ayırt edilir.
+3. **RAG deneyim katmanı** — Supervisor pipeline'ına yeni `retrieve_feedback` node eklendi; yeni vaka geldiğinde benzer sinyal örüntüsüne sahip geçmiş hemşire kararları prompt'a "Geçmiş Hemşire Kararları" bölümü olarak giriyor ve TriageCard / HistoryDetailModal'da kullanıcıya gösteriliyor.
+
+**Backend yeni dosyalar (1):**
+- `orchestration/feedback_store.py` — `FeedbackStore` Protocol + `JsonFeedbackStore`:
+  - Append-only JSONL (`.feedback/feedbacks.jsonl`), thread-safe lock
+  - `save(feedback)` — satır eklenir
+  - `list_all()` — `decision_id` başına en yeni kayıt (override desteği)
+  - `query_similar(signals_text, k=3)` — Jaccard token-overlap (RAG retriever ile aynı yaklaşım, tutarlı/deterministik)
+
+**Backend güncellenen dosyalar (4):**
+- `orchestration/schemas.py`:
+  - Yeni `HistoricalFeedback` modeli (nurse_name, hospital, original_category, nurse_verdict, verdict_kind, rationale_tr, feedback_at, similarity_score)
+  - Yeni `NurseFeedback` modeli (decision_id, patient_id, original_category, nurse_verdict, verdict_kind, rationale_tr, nurse_first_name/last_name/hospital, signals_summary, observations_snapshot, decided_at, feedback_at) + `to_historical()` helper
+  - `TriageDecision.historical_feedback: list[HistoricalFeedback]` alanı + `from_category` parametresi
+- `orchestration/supervisor.py`:
+  - `Supervisor.feedback_store` alanı (default `build_default_store()`)
+  - LangGraph'a yeni `retrieve_feedback` node — `retrieve_rag → retrieve_feedback → ask_llm → validate`
+  - State'e `historical_feedback: list[HistoricalFeedback]` eklendi
+  - `_validate` TriageDecision'a historical_feedback iliştirir
+  - Store sorgu hataları defensive (RAG advisory; pipeline crash olmaz)
+- `orchestration/prompts/supervisor.py`:
+  - "Geçmiş Hemşire Kararları (deneyim katmanı)" bölümü eklendi: ESI önceliklidir, geçmiş kararlardan farklı yöne sapan varsa rationale'a NOTE eklenir, birden çok hemşire aynı yönde ise güçlü sinyal kabul edilir, liste boşsa varsayılan ESI mantığı.
+  - `build_supervisor_user_prompt` artık 3. argüman `historical_feedback` alıyor, payload'a `historical_nurse_feedback` listesi olarak gidiyor.
+- `backend_api/app/main.py`:
+  - Lifespan'da `FeedbackStore` singleton + `Supervisor(feedback_store=...)`
+  - `POST /api/triage/feedback` — `NurseFeedback` al, store'a yaz, `{saved: true, decision_id}` dön
+  - `GET /api/triage/history` — `list[NurseFeedback]` dön (frontend ilk yüklemede çağırır)
+- `.gitignore` — `.feedback/` eklendi (local data, KVKK uyumu için repo'ya gitmez).
+
+**Frontend yeni komponent yok — sadece mevcut komponentler güncellendi.**
+
+**Frontend güncellenen dosyalar (7):**
+- `frontend/lib/types.ts` — `HistoricalFeedback` interface + `TriageDecision.historical_feedback` + `NurseFeedback` interface (backend ile birebir).
+- `frontend/lib/api.ts` — `postFeedback(NurseFeedback)`, `fetchHistory()`.
+- `frontend/components/useTriageStream.ts` (komple yeniden yazıldı):
+  - `useNurseSession` ile session ref tutulur (her render'da en güncel).
+  - Mount'ta `fetchHistory()` → verdicts + verdictNurses + history restore (decision_id bazlı tekrar-engelleme).
+  - SSE decision geldiğinde `decisionByKeyRef` cache'lenir; aynı decision_id daha önce restore'dan gelmişse history'e tekrar eklenmez.
+  - `setVerdict(key, verdict)` → state güncelle + otomatik `postFeedback()`. Verdict snapshot için decision + observations cache'ten alınır (history'den fallback).
+  - `signals_summary` her ajan sinyalinden tek-string olarak inşa edilir (token-overlap için).
+  - Yeni snapshot alanları: `verdictNurses: Record<key, NurseMeta>`.
+  - `HistoryEntry`'ye `restored?: boolean` flag eklendi (UI'da "geçmiş" işareti için).
+- `frontend/components/HistoryList.tsx`:
+  - `verdictNurses` prop'u eklendi.
+  - **Mesai değişikliği marker'ı**: önceki entry farklı hemşireden ise araya divider (`UserCog` ikonu + hemşire adı + saat).
+  - **Hemşire ismi caption**: her entry'nin altında küçük satır "{Ad} {Soyad} · HH:MM:SS".
+  - **Font vurgu**: şu anki session'dan farklı hemşirenin verdict'i italik + slate-600. Restore'dan gelen entry'lerde "· geçmiş" rozeti.
+- `frontend/components/HistoryDetailModal.tsx`:
+  - `nurse: NurseMeta | null` prop'u eklendi → verdict altında hemşire bilgisi satırı (`User` ikonu, ad-soyad, hastane, saat).
+  - **`HistoricalFeedbackBlock`**: kararın `decision.historical_feedback` listesi varsa modal'ın altında "Geçmiş benzer hemşire kararları" kartları. Her kart: hemşire adı + hastane + verdict kind rozeti (Onayladı/Reddetti/Değiştirdi) + "Sistem önerisi: X · Hemşire kararı: Y" + rationale italic.
+- `frontend/components/TriageCard.tsx`:
+  - `HistoricalFeedbackBanner` — kartın altında sky-50 banner: "Geçmiş hemşire deneyimleri" + ilk 2 kayıt: "{Hemşire} · benzer sinyalde {Original}'i {onayladı/reddetti/X'e çevirdi}".
+- `frontend/components/NurseVerdict.tsx`:
+  - "Hemşire kararı ChromaDB'ye kaydedilecek" notu güncellendi: "Hemşire kararı kalıcı olarak kaydedilir; benzer sinyallere sahip bir sonraki hastada sistem bu kararı 'geçmiş deneyim' olarak referans alır."
+- `frontend/app/page.tsx`:
+  - `verdictNurses`, `selectedNurse` state'leri çekildi, HistoryList ve HistoryDetailModal'a geçildi.
+
+**Veri akışı:**
+
+```
+Hemşire ✓ Onayla
+   ↓
+NurseVerdict.onChange → page.tsx handleVerdict
+   ↓
+useTriageStream.setVerdict
+   ↓
+   ├─→ verdicts + verdictNurses state güncelle (UI anında yansır)
+   └─→ postFeedback() — backend'e POST /api/triage/feedback
+              ↓
+       JsonFeedbackStore.save() — .feedback/feedbacks.jsonl
+              ↓
+       (yeni vaka için RAG'a hazır)
+
+Sayfa yenilendi / hemşire değişti:
+   ↓
+useTriageStream mount
+   ↓
+fetchHistory() → GET /api/triage/history
+   ↓
+verdicts + verdictNurses + history (restored=true) restore
+
+Yeni vaka geldi:
+   ↓
+Supervisor.decide(bundle)
+   ↓
+LangGraph: retrieve_rag → retrieve_feedback → ask_llm → validate
+                              ↓
+                  FeedbackStore.query_similar(signals)
+                              ↓
+                  HistoricalFeedback[] state'e
+                              ↓
+                  Prompt'a "Geçmiş Hemşire Kararları" payload
+                              ↓
+                  LLM kararı verir; rationale'da geçmişe atıf yapabilir
+                              ↓
+TriageDecision.historical_feedback (frontend'e SSE)
+   ↓
+TriageCard → "Geçmiş hemşire deneyimleri" banner
+HistoryDetailModal → "Geçmiş benzer hemşire kararları" kartları
+```
+
+**Doğrulama (manuel test edildi):**
+- `python -m pytest gateway_agents/tests orchestration/tests -v` → **27/27 PASS**
+- `npx tsc --noEmit` → clean
+- Backend canlı testleri (curl):
+  - `GET /api/triage/history` → `[]` (boş)
+  - `POST /api/triage/feedback` (örnek payload) → `{saved: true, decision_id: ...}`
+  - `GET /api/triage/history` → eklenen kayıt görünür
+  - `POST /api/triage/demo?scenario=red` → decision payload'ında `historical_feedback` 1 kayıtla geliyor ("Ayşe Demir · Acıbadem Maslak · override · similarity 0.105")
+- Frontend canlı akış: login → demo butonu → verdict ver → sayfa yenile (`Cmd+R`) → veri DURUYOR; çıkış → tekrar gir → veriler hâlâ var; ikinci kez aynı demo'yu tetikle → TriageCard'da "Geçmiş hemşire deneyimleri" banner'ı görünür.
+
+**Açık takipler:**
+- ChromaDB swap'ı için `FeedbackStore` protocol hazır; pilot fazında embedding-tabanlı similarity için `ChromaFeedbackStore` yazılabilir. Hackathon için JSON + Jaccard yeterli, deterministik.
+- Hemşire kararı override edildiğinde rationale yazma alanı yok (UI'da yok); şimdilik boş string gönderiyor. Demo değerini artırmak için NurseVerdict'e küçük textarea eklenebilir.
+- Verdict silme yok — yanlış verdict düzeltilirse aynı `decision_id` ile yeni POST atılır, `list_all()` son kaydı tutar (override mantığı).
 
 ## Faz 4.6 — Hemşire girişi + Anatomik radyal layout · ✅ Tamamlandı (2026-05-16)
 

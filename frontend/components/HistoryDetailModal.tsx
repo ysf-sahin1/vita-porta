@@ -11,8 +11,10 @@ import {
   Droplets,
   Footprints,
   HelpCircle,
+  History,
   Smile,
   Thermometer,
+  User,
   X,
 } from "lucide-react";
 import { useEffect } from "react";
@@ -21,7 +23,7 @@ import {
   NurseVerdict,
   type Verdict,
 } from "./NurseVerdict";
-import type { HistoryEntry } from "./useTriageStream";
+import type { HistoryEntry, NurseMeta } from "./useTriageStream";
 
 type AgentKey = "gait" | "skin" | "respiration" | "thermal" | "expression";
 
@@ -64,6 +66,7 @@ const AGENT_META: Record<
 export interface HistoryDetailModalProps {
   entry: HistoryEntry | null;
   verdict: Verdict | null;
+  nurse: NurseMeta | null;
   onVerdictChange: (v: Omit<Verdict, "at">) => void;
   onClose: () => void;
 }
@@ -71,6 +74,7 @@ export interface HistoryDetailModalProps {
 export function HistoryDetailModal({
   entry,
   verdict,
+  nurse,
   onVerdictChange,
   onClose,
 }: HistoryDetailModalProps) {
@@ -150,9 +154,85 @@ export function HistoryDetailModal({
         </div>
 
         <NurseVerdict verdict={verdict} onChange={onVerdictChange} />
+
+        {nurse && verdict && (
+          <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+            <User className="w-3.5 h-3.5 text-slate-400" strokeWidth={2.2} />
+            <span>
+              <span className="font-medium text-slate-700">
+                {nurse.firstName} {nurse.lastName}
+              </span>
+              <span className="text-slate-400"> · {nurse.hospital}</span>
+              <span className="tabular-nums text-slate-400"> · {formatTime(nurse.feedbackAt)}</span>
+            </span>
+          </div>
+        )}
+
+        <HistoricalFeedbackBlock decision={entry.decision} />
       </div>
     </div>
   );
+}
+
+function HistoricalFeedbackBlock({
+  decision,
+}: {
+  decision: HistoryEntry["decision"];
+}) {
+  const items = decision.historical_feedback ?? [];
+  if (items.length === 0) return null;
+  return (
+    <div className="mt-5 pt-4 border-t border-slate-200/60">
+      <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-slate-500 mb-2">
+        <History className="w-3.5 h-3.5 text-slate-400" strokeWidth={2.2} />
+        <span>Geçmiş benzer hemşire kararları</span>
+      </div>
+      <ul className="space-y-2">
+        {items.map((fb, i) => (
+          <li
+            key={i}
+            className="rounded-xl border border-slate-200/70 bg-white/70 px-3 py-2 text-xs text-slate-700"
+          >
+            <div className="flex items-center gap-2">
+              <span className="font-medium text-slate-700">{fb.nurse_name}</span>
+              <span className="text-slate-400">· {fb.hospital}</span>
+              <span
+                className={cn(
+                  "ml-auto px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider",
+                  fb.verdict_kind === "approve"
+                    ? "bg-emerald-50 text-emerald-700"
+                    : fb.verdict_kind === "reject"
+                      ? "bg-rose-50 text-rose-700"
+                      : "bg-amber-50 text-amber-700",
+                )}
+              >
+                {fb.verdict_kind === "approve"
+                  ? "Onayladı"
+                  : fb.verdict_kind === "reject"
+                    ? "Reddetti"
+                    : "Değiştirdi"}
+              </span>
+            </div>
+            <div className="mt-1 text-slate-500">
+              Sistem önerisi: <strong>{trCategory(fb.original_category)}</strong> · Hemşire kararı:{" "}
+              <strong>{trCategory(fb.nurse_verdict)}</strong>
+            </div>
+            {fb.rationale_tr && (
+              <div className="mt-1 italic text-slate-500">"{fb.rationale_tr}"</div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function trCategory(c: string): string {
+  if (c === "red") return "Kırmızı";
+  if (c === "yellow") return "Sarı";
+  if (c === "green") return "Yeşil";
+  if (c === "insufficient") return "Yetersiz";
+  return c;
 }
 
 function AgentSummary({ agent, obs }: { agent: AgentKey; obs: AgentObservation | undefined }) {

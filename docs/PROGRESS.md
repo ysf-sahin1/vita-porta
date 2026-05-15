@@ -8,6 +8,7 @@ Bu dosya geliştirme oturumlarının kaldığı yerden devam edebilmesi için tu
 - ✅ **Faz 4.6** (hemşire giriş ekranı + anatomik radyal layout) tamamlandı
 - ✅ **Faz 5.5** (origin/main Phase 5 rewrite ile birleşme) tamamlandı
 - ✅ **Faz 5.6** (yüz ifadesi ajanı eklenmesiyle Faz 5'in resmi kapanışı) tamamlandı
+- ✅ **Faz 5.7** (hemşire verdict persistance + mesai history + RAG deneyim katmanı) tamamlandı
 - ✅ **Faz 7** (uçtan uca canlı demo doğrulaması) tamamlandı
 - 🔴 **Faz 6** (edge firmware + Docker compose) başlanmadı — hackathon için opsiyonel
 - 🔴 **Faz 8** (pitch polish + demo videosu yedek) başlanmadı
@@ -273,7 +274,7 @@ Webcam / ESP32-CAM ──► AnalysisWindow (3sn pencere)
 
 ## Açık takipler (Faz 5 dışı, ilerleyen turlara)
 
-- **Backend `/api/triage/feedback` endpoint'i** — hemşire Onayla/Reddet/Değiştir verdict'leri şu an sadece tarayıcı belleğinde. UI hazır, sadece HTTP wiring + ChromaDB persistance gerekiyor. Supervisor öğrenmesi bu veriyi kullanacak.
+- ✅ ~~Backend `/api/triage/feedback` endpoint'i~~ → **Faz 5.7'de tamamlandı** (JSON store, mesai history, supervisor RAG entegrasyonu).
 - **3sn "Analiz ediliyor…" pencere animasyonu** — observation→decision arası halka, demo wow-factor için planlıydı.
 - **Termal `ThermalSource`** — MLX90640/FLIR Lepton bağlanırsa proxy modundan çıkış adapter'ı.
 - **Eğitilmiş ağrı/mimik modeli** — expression ajanı geometrik proxy modunda; PSPI veya DeepFace pain model pilot fazına bırakıldı.

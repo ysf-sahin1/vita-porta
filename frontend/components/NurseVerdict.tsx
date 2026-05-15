@@ -167,7 +167,8 @@ function CategoryPicker({
 function ChromaNotice() {
   return (
     <p className="mt-3 text-[11px] italic text-slate-400 leading-relaxed">
-      Hemşire kararı ChromaDB'ye kaydedilerek sistem öğrenmesinde kullanılacaktır.
+      Hemşire kararı kalıcı olarak kaydedilir; benzer sinyallere sahip bir sonraki hastada
+      sistem bu kararı "geçmiş deneyim" olarak referans alır.
     </p>
   );
 }

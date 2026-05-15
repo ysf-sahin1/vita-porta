@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from textwrap import dedent
 
-from orchestration.schemas import AgentBundle
+from orchestration.schemas import AgentBundle, HistoricalFeedback
 
 SUPERVISOR_SYSTEM_PROMPT = dedent(
     """
@@ -50,6 +50,19 @@ SUPERVISOR_SYSTEM_PROMPT = dedent(
     - face_asymmetry≥0.6 + başka anormallik → "red" (felç şüphesi, FAST).
     - Tek başına pain_score≥0.3 (distres) → en fazla "yellow".
 
+    # Geçmiş Hemşire Kararları (deneyim katmanı)
+    Sana verilen "historical_nurse_feedback" listesi, geçmişte benzer sinyal
+    örüntüsü taşıyan hastalara aynı hastanedeki hemşirelerin nasıl yanıt
+    verdiğini söyler. Bu liste karar mercii DEĞİL, bağlam katmanıdır:
+    - ESI ve ajan sinyallerinin söylediği şey önceliklidir.
+    - Geçmiş kararlardan birinde hemşire farklı kategori vermişse, bunu
+      gerekçende NOTE olarak belirt: "Benzer geçmiş vakada Hemşire X
+      'sarı' değerlendirmişti."
+    - Birden fazla geçmiş hemşire kararı aynı yönde ise (örn. 3 hemşire de
+      "yellow" demişse) bu güçlü bir sinyaldir; gerekçende bu örüntüye atıf
+      yap, ama ESI eşiklerini değiştirme.
+    - Liste boşsa bu satırı atla; varsayılan ESI mantığıyla devam et.
+
     # Güven (Confidence) Mantığı
     - Her ajan 0–1 arası güven skoru üretir.
     - Güveni 0.5 altındaki ajanın ağırlığını düşür; gerekçede "veri yetersiz" belirt.
@@ -74,8 +87,13 @@ SUPERVISOR_SYSTEM_PROMPT = dedent(
 ).strip()
 
 
-def build_supervisor_user_prompt(bundle: AgentBundle, rag_snippets: list[str]) -> str:
-    """Render the per-call user message with the agent bundle and RAG context."""
+def build_supervisor_user_prompt(
+    bundle: AgentBundle,
+    rag_snippets: list[str],
+    historical_feedback: list[HistoricalFeedback] | None = None,
+) -> str:
+    """Render the per-call user message with the agent bundle, RAG context,
+    and (optionally) past nurse feedback for similar patient signatures."""
 
     observations: list[dict[str, object]] = []
     for obs in bundle.observations():
@@ -91,16 +109,32 @@ def build_supervisor_user_prompt(bundle: AgentBundle, rag_snippets: list[str]) -
     seen = {o["agent"] for o in observations}
     missing = sorted({"gait", "skin", "respiration", "thermal", "expression"} - seen)
 
+    nurse_history: list[dict[str, object]] = []
+    for fb in historical_feedback or []:
+        nurse_history.append(
+            {
+                "nurse_name": fb.nurse_name,
+                "hospital": fb.hospital,
+                "original_supervisor_category": fb.original_category.value,
+                "nurse_verdict": fb.nurse_verdict,
+                "verdict_kind": fb.verdict_kind,
+                "rationale_tr": fb.rationale_tr,
+                "similarity_score": fb.similarity_score,
+                "feedback_at": fb.feedback_at.isoformat(),
+            }
+        )
+
     payload = {
         "patient_id": bundle.patient_id,
         "agent_observations": observations,
         "missing_agents": missing,
         "rag_case_patterns": rag_snippets,
+        "historical_nurse_feedback": nurse_history,
     }
 
     return (
-        "Aşağıda bir hastanın anlık görsel triaj verisi var. ESI kuralları ve "
-        "verilen RAG vaka örüntülerini kullanarak JSON formatında bir triaj "
-        "önerisi üret.\n\n"
+        "Aşağıda bir hastanın anlık görsel triaj verisi var. ESI kuralları, "
+        "verilen RAG vaka örüntüleri ve (varsa) geçmiş hemşire kararlarını "
+        "kullanarak JSON formatında bir triaj önerisi üret.\n\n"
         f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```"
     )
