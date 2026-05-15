@@ -82,7 +82,42 @@ function formatString(key: string, v: string): FormattedSignal | null {
     case "sensor_type":
       return {
         label: "Sensör",
-        display: v === "rgb_proxy" ? "RGB Proxy" : v === "thermal" ? "Termal" : cap(v),
+        display:
+          v === "rgb_proxy"
+            ? "RGB Proxy"
+            : v === "thermal"
+              ? "Termal"
+              : v === "geometric_proxy"
+                ? "Geometrik Proxy"
+                : v === "trained_model"
+                  ? "Eğitilmiş Model"
+                  : cap(v),
+      };
+    case "expression_state":
+      return {
+        label: "İfade",
+        display:
+          v === "ağrı"
+            ? "Ağrı"
+            : v === "distres"
+              ? "Distres"
+              : v === "sakin"
+                ? "Sakin"
+                : v === "belirsiz"
+                  ? "Belirsiz"
+                  : cap(v),
+      };
+    case "consciousness_hint":
+      return {
+        label: "Bilinç",
+        display:
+          v === "uyanık"
+            ? "Uyanık"
+            : v === "yarı_uyanık"
+              ? "Yarı Uyanık"
+              : v === "belirsiz"
+                ? "Belirsiz"
+                : cap(v),
       };
     default:
       return null;
@@ -114,6 +149,14 @@ function formatNumber(key: string, v: number): FormattedSignal | null {
       return { label: "Sıcaklık", display: `${v.toFixed(1)}°C` };
     case "warmth_score":
       return { label: "Sıcaklık Skoru", display: pct(v) };
+    case "pain_score":
+      return { label: "Ağrı Skoru", display: pct(v) };
+    case "eye_openness":
+      return { label: "Göz Açıklığı", display: pct(v) };
+    case "face_asymmetry":
+      return { label: "Yüz Asimetri", display: pct(v) };
+    case "landmark_count":
+      return { label: "Landmark", display: `${Math.round(v)}` };
     default:
       return null;
   }

@@ -4,11 +4,19 @@ import { cn } from "@/lib/cn";
 import { inferAgentReason } from "@/lib/agentReasons";
 import { formatSignal } from "@/lib/signalLabels";
 import type { AgentObservation } from "@/lib/types";
-import { Activity, AlertTriangle, Droplets, Footprints, Info, Thermometer } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  Droplets,
+  Footprints,
+  Info,
+  Smile,
+  Thermometer,
+} from "lucide-react";
 import { PostureSilhouette } from "./PostureSilhouette";
 import { Tooltip } from "./Tooltip";
 
-type Agent = "gait" | "skin" | "respiration" | "thermal";
+type Agent = "gait" | "skin" | "respiration" | "thermal" | "expression";
 
 const AGENT_META: Record<
   Agent,
@@ -18,6 +26,12 @@ const AGENT_META: Record<
   skin: { label: "Ten Rengi Ajanı", Icon: Droplets, color: "text-rose-600", bg: "bg-rose-50" },
   respiration: { label: "Solunum Ajanı", Icon: Activity, color: "text-sky-600", bg: "bg-sky-50" },
   thermal: { label: "Termal Ajan", Icon: Thermometer, color: "text-orange-600", bg: "bg-orange-50" },
+  expression: {
+    label: "Yüz İfadesi Ajanı",
+    Icon: Smile,
+    color: "text-violet-600",
+    bg: "bg-violet-50",
+  },
 };
 
 export function AgentPanel({
@@ -26,7 +40,7 @@ export function AgentPanel({
   observations: Partial<Record<Agent, AgentObservation>>;
 }) {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
       {(Object.keys(AGENT_META) as Agent[]).map((agent) => (
         <AgentCard key={agent} agent={agent} obs={observations[agent]} />
       ))}

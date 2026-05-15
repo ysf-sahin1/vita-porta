@@ -36,7 +36,7 @@ class AgentObservation(BaseModel):
     card; signals carry the machine-readable details the supervisor reasons over.
     """
 
-    agent: Literal["gait", "skin", "respiration", "thermal"]
+    agent: Literal["gait", "skin", "respiration", "thermal", "expression"]
     confidence: float = Field(ge=0.0, le=1.0)
     summary_tr: str = Field(description="Hemşireye gösterilecek tek cümlelik Türkçe gözlem")
     signals: dict[str, float | str | bool] = Field(default_factory=dict)
@@ -58,10 +58,17 @@ class AgentBundle(BaseModel):
     skin: AgentObservation | None = None
     respiration: AgentObservation | None = None
     thermal: AgentObservation | None = None
+    expression: AgentObservation | None = None
     captured_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     def observations(self) -> list[AgentObservation]:
-        candidates = (self.gait, self.skin, self.respiration, self.thermal)
+        candidates = (
+            self.gait,
+            self.skin,
+            self.respiration,
+            self.thermal,
+            self.expression,
+        )
         return [obs for obs in candidates if obs is not None]
 
 

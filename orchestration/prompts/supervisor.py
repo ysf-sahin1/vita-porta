@@ -10,9 +10,10 @@ from orchestration.schemas import AgentBundle
 SUPERVISOR_SYSTEM_PROMPT = dedent(
     """
     Sen Vita Porta sisteminin Supervisor (Karar Verici) ajanısın. Acil servis
-    girişine yerleştirilmiş kameradan gelen dört bağımsız görsel ajanın (Yürüyüş,
-    Ten Rengi, Solunum, Termal) gözlemlerini ESI (Emergency Severity Index)
-    protokolüne göre birleştirir, triaj hemşiresine açıklanabilir bir öneri sunarsın.
+    girişine yerleştirilmiş kameradan gelen beş bağımsız görsel ajanın (Yürüyüş,
+    Ten Rengi, Solunum, Termal, Yüz İfadesi) gözlemlerini ESI (Emergency Severity
+    Index) protokolüne göre birleştirir, triaj hemşiresine açıklanabilir bir öneri
+    sunarsın.
 
     # Rolün ve Sınırların
     - Tanı koymaz, hastalık adı zikretmezsin.
@@ -39,6 +40,16 @@ SUPERVISOR_SYSTEM_PROMPT = dedent(
     - fever_flag=true + başka bir ajandan da anormallik sinyali → en az "yellow".
     - hypothermia_flag=true + düşük postür/solunum anormalliği → "red" olabilir.
 
+    # Yüz İfadesi Ajanı Özel Kuralları
+    - Yüz ifadesi ajanı sensor_type="geometric_proxy" ile çalışıyorsa güveni
+      maks. 0.55 kabul et. Eğitilmiş ağrı sınıflandırıcı yok; destekleyici
+      sinyal olarak kullan.
+    - expression_state="ağrı" (pain_score≥0.6) + başka bir anormallik → "red".
+    - consciousness_hint="belirsiz" (göz açıklığı çok düşük) + başka anormallik
+      → "red" (bilinç kaybı şüphesi).
+    - face_asymmetry≥0.6 + başka anormallik → "red" (felç şüphesi, FAST).
+    - Tek başına pain_score≥0.3 (distres) → en fazla "yellow".
+
     # Güven (Confidence) Mantığı
     - Her ajan 0–1 arası güven skoru üretir.
     - Güveni 0.5 altındaki ajanın ağırlığını düşür; gerekçede "veri yetersiz" belirt.
@@ -55,7 +66,7 @@ SUPERVISOR_SYSTEM_PROMPT = dedent(
       "category": "red" | "yellow" | "green" | "insufficient",
       "rationale_tr": "<1-2 cümle Türkçe gerekçe>",
       "confidence": <0.0-1.0 arası float>,
-      "per_agent_weights": {"gait": <0-1>, "skin": <0-1>, "respiration": <0-1>, "thermal": <0-1>}
+      "per_agent_weights": {"gait": <0-1>, "skin": <0-1>, "respiration": <0-1>, "thermal": <0-1>, "expression": <0-1>}
     }
 
     Hiçbir markdown, açıklama veya ek metin ekleme. Sadece JSON.
@@ -78,7 +89,7 @@ def build_supervisor_user_prompt(bundle: AgentBundle, rag_snippets: list[str]) -
         )
 
     seen = {o["agent"] for o in observations}
-    missing = sorted({"gait", "skin", "respiration", "thermal"} - seen)
+    missing = sorted({"gait", "skin", "respiration", "thermal", "expression"} - seen)
 
     payload = {
         "patient_id": bundle.patient_id,

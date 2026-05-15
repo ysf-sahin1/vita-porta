@@ -99,8 +99,8 @@ export function TriageCard({ decision, verdict, onVerdictChange }: TriageCardPro
             align="left"
           />
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-          {(["gait", "skin", "respiration", "thermal"] as const).map((name) => {
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 text-sm">
+          {(["gait", "skin", "respiration", "thermal", "expression"] as const).map((name) => {
             const w = decision.per_agent_weights[name] ?? 0;
             const label =
               name === "gait"
@@ -109,7 +109,9 @@ export function TriageCard({ decision, verdict, onVerdictChange }: TriageCardPro
                   ? "Ten Rengi"
                   : name === "respiration"
                     ? "Solunum"
-                    : "Termal";
+                    : name === "thermal"
+                      ? "Termal"
+                      : "İfade";
             return (
               <div key={name} className="rounded-xl border border-slate-200/60 p-3 bg-white/50">
                 <div className="text-[11px] uppercase text-slate-500 tracking-wide">{label}</div>

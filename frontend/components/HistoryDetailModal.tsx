@@ -11,6 +11,7 @@ import {
   Droplets,
   Footprints,
   HelpCircle,
+  Smile,
   Thermometer,
   X,
 } from "lucide-react";
@@ -22,7 +23,7 @@ import {
 } from "./NurseVerdict";
 import type { HistoryEntry } from "./useTriageStream";
 
-type AgentKey = "gait" | "skin" | "respiration" | "thermal";
+type AgentKey = "gait" | "skin" | "respiration" | "thermal" | "expression";
 
 const CATEGORY_STYLE: Record<
   TriageCategory,
@@ -57,6 +58,7 @@ const AGENT_META: Record<
   skin: { label: "Ten Rengi", Icon: Droplets, color: "text-rose-600", bg: "bg-rose-50" },
   respiration: { label: "Solunum", Icon: Activity, color: "text-sky-600", bg: "bg-sky-50" },
   thermal: { label: "Termal", Icon: Thermometer, color: "text-orange-600", bg: "bg-orange-50" },
+  expression: { label: "Yüz İfadesi", Icon: Smile, color: "text-violet-600", bg: "bg-violet-50" },
 };
 
 export interface HistoryDetailModalProps {

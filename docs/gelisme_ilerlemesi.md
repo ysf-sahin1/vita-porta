@@ -2,7 +2,7 @@
 
 Bu dosya geliştirme oturumlarının kaldığı yerden devam edebilmesi için tutulur. Her faz: durum, neyin tamamlandığı, neyin kaldığı, ilgili dosyalar ve doğrulama yöntemi.
 
-**Genel durum:** 7.5/8 faz tamamlandı + **Faz 4.5 (Frontend yenileme)** tamamlandı. Sistem **gerçek webcam'den canlı çalışıyor**: 4 görsel ajan (yürüyüş, ten rengi, solunum, termal) paralel işliyor, supervisor karar üretiyor, dashboard SSE ile yayınlıyor. Frontend Health-OS stilinde komple yenilendi (`frontend-yenileme` branch, 2026-05-14): Inter font, glassmorphism, hemşire onay/red/değiştir akışı, history detay modal'ı, Türkçe sinyal etiketleri. **mertmrz branch'i ile origin/main (Yusuf'un Phase 5 rewrite'ı) birleştirildi ve tüm değişiklikler ana projeye (ysf-sahin1/vita-porta) push'landı** (2026-05-13). Kalan: edge firmware + Docker compose (Faz 6) ve pitch polish (Faz 8).
+**Genel durum:** 7.5/8 faz tamamlandı + **Faz 4.5 (Frontend yenileme)** tamamlandı + **Faz 5 tamamen kapandı** (2026-05-16, 5. ajan eklendi). Sistem **gerçek webcam'den canlı çalışıyor**: **5 görsel ajan (yürüyüş, ten rengi, solunum, termal, yüz ifadesi)** paralel işliyor, supervisor karar üretiyor, dashboard SSE ile yayınlıyor. Frontend Health-OS stilinde komple yenilendi (`frontend-yenileme` branch, 2026-05-14): Inter font, glassmorphism, hemşire onay/red/değiştir akışı, history detay modal'ı, Türkçe sinyal etiketleri. 5. ajan (ExpressionAgent — MediaPipe Face Mesh ile ağrı/bilinç/asimetri) eklendiğinde frontend component entegrasyonu da yapıldı (AgentPanel 5'li grid, TriageCard 5 sütunlu per-agent ağırlık, HistoryDetailModal 5 ajan snapshot). **mertmrz branch'i ile origin/main (Yusuf'un Phase 5 rewrite'ı) birleştirildi ve tüm değişiklikler ana projeye (ysf-sahin1/vita-porta) push'landı** (2026-05-13). Kalan: edge firmware + Docker compose (Faz 6) ve pitch polish (Faz 8).
 
 **NotebookLM bağlantısı:** Notebook ID `d9854800-b703-4b71-919f-6121bb3e05d8`. Proje bağlamı her oturumda NotebookLM'den çekilir.
 
@@ -50,7 +50,7 @@ Bu dosya geliştirme oturumlarının kaldığı yerden devam edebilmesi için tu
 
 **Doğrulama:** Backend açıkken dashboard'da demo butonlarına basınca üç vaka sırayla görünür, ajan kartları dolar, triaj kartı renkli pulse ile gelir.
 
-## Faz 5 — Görsel ajanlar · ✅ Tamamlandı + Termal Ajan Eklendi (2026-05-13)
+## Faz 5 — Görsel ajanlar · ✅ Tamamlandı + Termal Ajan Eklendi (2026-05-13) + Yüz İfadesi Ajanı (2026-05-16, Faz 5 resmi kapanışı)
 **Yapılanlar:**
 - `gateway_agents/agents/base.py` — `Agent` soyut sınıfı + `AnalysisWindow` dataclass (frames + fps).
 - `gateway_agents/agents/gait.py` — **MediaPipe Pose** ile:
@@ -107,6 +107,76 @@ Bu dosya geliştirme oturumlarının kaldığı yerden devam edebilmesi için tu
 **Doğrulama:**
 - `python -m pytest gateway_agents/tests orchestration/tests -v` → **11/11 PASS**.
 - Webcam runner canlı çalıştı: backend'e POST, dashboard'da kararlar göründü (2026-05-13 oturumu).
+
+## Faz 5.6 — Yüz İfadesi Ajanı (5. ajan, Faz 5 resmi kapanışı) · ✅ Tamamlandı (2026-05-16)
+
+**Bağlam:** `docs/teknik_rapor.md` baştan beri 5 ajandan bahsediyordu (yürüyüş, ten rengi, solunum, termal, **yüz ifadesi**). Termal 2026-05-13'te eklendi ama yüz ifadesi ajanı atlanmıştı. Bu turda 5. ajan eklendi, schema/prompt/mock/runner/test ve **component entegrasyonuna kadar** olan frontend güncellendi. Asıl redesign (yeni layout/stil) ayrı bir tura bırakıldı.
+
+**Yeni dosya:**
+- `gateway_agents/agents/expression.py` — **MediaPipe Face Mesh (468 landmark)** ile geometrik kural-tabanlı ajan:
+  - **EAR (Eye Aspect Ratio):** Soldaki+sağdaki gözlerin dikey/yatay landmark mesafe oranı. ≥0.20 → uyanık, 0.10–0.20 → yarı uyanık, <0.10 → bilinç belirsiz.
+  - **Pain score (PSPI basitleştirmesi):** Kaş içe-çatma mesafesi (landmark 55 ↔ 285, yüz genişliğine normalize) + göz kısma (1 − EAR). Gerçek PSPI 4 AU'nun toplamı; burada eğitilmiş classifier olmadan iki geometrik bileşen kullanılıyor.
+  - **Face asymmetry:** 6 sol-sağ landmark çifti (göz, kaş, ağız köşesi, yanak) burun-orta-hattına göre yatay+düşey sapma → 0..1.
+  - **expression_state:** `ağrı` (pain≥0.6) / `distres` (pain≥0.3) / `sakin` / `belirsiz`.
+  - **consciousness_hint:** `uyanık` / `yarı_uyanık` / `belirsiz`.
+  - **Confidence:** Geometrik proxy modunda max 0.55 (`sensor_type="geometric_proxy"`); trained model bağlandığında 0.95'e çıkar.
+
+**Backend entegrasyonu:**
+- `orchestration/schemas.py`:
+  - `AgentObservation.agent` Literal'ine `"expression"` eklendi.
+  - `AgentBundle`'a `expression: AgentObservation | None` alanı; `observations()` 5 ajanı döner.
+- `orchestration/prompts/supervisor.py`:
+  - Sistem prompt'u "beş bağımsız görsel ajan" olarak güncellendi.
+  - Yüz İfadesi Ajanı Özel Kuralları bölümü eklendi: ağrı + başka anormallik → red; consciousness_hint=belirsiz + başka anormallik → red (bilinç kaybı şüphesi); face_asymmetry≥0.6 + başka anormallik → red (FAST/felç şüphesi).
+  - `per_agent_weights` JSON şeması ve `missing_agents` set'i 5'lik.
+- `orchestration/llm.py` MockLLMClient:
+  - `weights` sözlüğü 5 anahtarlı.
+  - Expression parsing bloğu: ağrı (pain≥0.6) tek başına sarı, başka anormallikle birleşirse kırmızı; asimetri/bilinç düşüklüğü başka anormallikle red'e katkı.
+- `orchestration/demo.py` — 3 senaryoya expression observation eklendi:
+  - Kırmızı: `expression_state="ağrı"`, pain=0.78, confidence=0.52.
+  - Sarı: `expression_state="distres"`, pain=0.42, confidence=0.48.
+  - Yeşil: `expression_state="sakin"`, pain=0.08, confidence=0.50.
+- `gateway_agents/agents/__init__.py` — `ExpressionAgent` export.
+- `gateway_agents/runner.py`:
+  - `max_workers` 4→5.
+  - `_analyze` 5. future submit eder; `_build_bundle` 5 ajan.
+  - `close()` expression'ı da kapatır.
+
+**Test güncellemeleri:**
+- `gateway_agents/tests/test_agents.py`:
+  - `TestExpressionAgent` sınıfı (3 test: empty/black/random frames).
+  - Schema conformance parametrize'a `_expression_obs` eklendi.
+- `gateway_agents/tests/test_runner.py`:
+  - `test_run_once_returns_bundle_with_five_observations` (eski adı `four_observations`).
+  - Payload kontrolü 5 ajan adı için.
+
+**Frontend (sadece component entegrasyonu — redesign hariç):**
+- `frontend/lib/types.ts` — `AgentObservation.agent` Literal'ine `"expression"`.
+- `frontend/lib/signalLabels.ts` — Türkçe etiketler:
+  - `expression_state` → Ağrı / Distres / Sakin / Belirsiz
+  - `consciousness_hint` → Uyanık / Yarı Uyanık / Belirsiz
+  - `pain_score`, `eye_openness`, `face_asymmetry` → yüzdelik display
+  - `sensor_type` enum'ına `geometric_proxy` → "Geometrik Proxy", `trained_model` → "Eğitilmiş Model"
+- `frontend/lib/agentReasons.ts` — Expression için reason hint'leri: geometric_proxy info pill, düşük face_ratio warn, düşük confidence warn.
+- `frontend/components/AgentPanel.tsx`:
+  - `AGENT_META`'ya expression (Smile ikonu, `text-violet-600` + `bg-violet-50`).
+  - Grid `xl:grid-cols-4` → `xl:grid-cols-5`.
+- `frontend/components/TriageCard.tsx`:
+  - Per-agent ağırlık paneli `md:grid-cols-4` → `md:grid-cols-3 xl:grid-cols-5`.
+  - 5. ajan etiketi "İfade" (kısa).
+- `frontend/components/HistoryDetailModal.tsx`:
+  - `AgentKey` 5'li.
+  - `AGENT_META`'ya expression (Smile, violet).
+- `frontend/components/useTriageStream.ts` — `AgentKey` 5'li.
+
+**Doğrulama:**
+- `python -m pytest gateway_agents/tests orchestration/tests -v` → **27/27 PASS** (eski 23 + 4 yeni: 3 ExpressionAgent + 1 schema conformance).
+- `npx tsc --noEmit` → clean.
+
+**Açık takipler (Faz 5 dışı — diğer fazlara taşındı):**
+- Frontend tasarımı yenilenecek — kullanıcı mevcut Health-OS layout'tan tam memnun değil; yeni redesign turu ayrı planlanacak.
+- `docs/teknik_rapor.md` 5 ajan iddiası artık koda uyumlu, hizalama tamamlandı (open karar listesinden çıkarılabilir).
+- Eğitilmiş ağrı/mimik modeli (PSPI veya benzeri) entegrasyonu pilot fazına bırakıldı; hackathon kapsamı geometrik proxy ile yeterli.
 
 ## Faz 6 — Edge firmware + Docker · 🔴 Başlanmadı
 **Yapılacaklar:**
@@ -295,7 +365,7 @@ orchestration/demo.py            # 3 senaryoya thermal observation
 - **LLM provider:** `OPENAI_API_KEY` veya `ANTHROPIC_API_KEY` yoksa `MockLLMClient` otomatik devreye girer. Demo için API key olsa daha zengin gerekçe çıkar.
 
 ## Açık kararlar (güncellendi)
-- **Ajan sayısı:** Uygulama 4 ajan (gait, skin, respiration, thermal). `docs/teknik_rapor.md` hâlâ 5 ajandan (termal + yüz ifadesi) bahsediyor; yüz ifadesi ajanı kapsam dışı bırakıldı, teknik rapor hizalama beklemede.
+- **Ajan sayısı:** Uygulama **5 ajan** (gait, skin, respiration, thermal, **expression** — 2026-05-16 eklendi). `docs/teknik_rapor.md`'deki 5 ajan iddiasıyla artık birebir hizalı.
 - **LLM provider:** API key yoksa `MockLLMClient` otomatik devreye girer. Gerçek LLM için `.env`'e `ANTHROPIC_API_KEY` veya `OPENAI_API_KEY` girilmeli.
 - **Termal kamera:** Şu an `rgb_proxy` modunda. Gerçek MLX90640/FLIR bağlandığında `ThermalAgent.analyze()`'a sıcaklık matrisi besleyecek ayrı bir `ThermalSource` yazılmalı.
 - **Hemşire verdict persistance:** Frontend'te Onayla/Reddet/Değiştir akışı tamamlandı (2026-05-14), ama backend'e POST yapılmıyor. Verdict'ler `useTriageStream` içindeki `verdicts` map'inde — tarayıcı belleğinde. `POST /api/triage/feedback` endpoint'i + ChromaDB persistance gerekiyor; supervisor öğrenmesi bu veriyi kullanacak.

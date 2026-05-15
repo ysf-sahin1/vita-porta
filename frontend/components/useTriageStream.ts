@@ -5,7 +5,7 @@ import type { AgentObservation, TriageDecision } from "@/lib/types";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Verdict } from "./NurseVerdict";
 
-type AgentKey = "gait" | "skin" | "respiration" | "thermal";
+type AgentKey = "gait" | "skin" | "respiration" | "thermal" | "expression";
 type Observations = Partial<Record<AgentKey, AgentObservation>>;
 
 export interface PatientState {

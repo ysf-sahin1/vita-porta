@@ -1,7 +1,7 @@
 export type TriageCategory = "red" | "yellow" | "green" | "insufficient";
 
 export interface AgentObservation {
-  agent: "gait" | "skin" | "respiration" | "thermal";
+  agent: "gait" | "skin" | "respiration" | "thermal" | "expression";
   confidence: number;
   summary_tr: string;
   signals: Record<string, number | string | boolean>;

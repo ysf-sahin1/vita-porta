@@ -25,6 +25,7 @@ import httpx
 
 from gateway_agents.agents import (
     AnalysisWindow,
+    ExpressionAgent,
     GaitAgent,
     RespirationAgent,
     SkinAgent,
@@ -40,14 +41,14 @@ _HTTP_TIMEOUT_S = 10.0
 
 
 class Runner:
-    """Pulls frames, runs four agents in parallel, posts the bundle to the backend."""
+    """Pulls frames, runs five agents in parallel, posts the bundle to the backend."""
 
     def __init__(
         self,
         source: FrameSource,
         backend_url: str = "http://127.0.0.1:8000",
         window_duration_s: float = 3.0,
-        max_workers: int = 4,
+        max_workers: int = 5,
     ) -> None:
         self.source = source
         self.backend_url = backend_url.rstrip("/")
@@ -60,6 +61,7 @@ class Runner:
         self._skin = SkinAgent()
         self._respiration = RespirationAgent()
         self._thermal = ThermalAgent()
+        self._expression = ExpressionAgent()
 
         self._frame_iter = source.frames()
         self._closed = False
@@ -109,7 +111,13 @@ class Runner:
         except Exception:  # noqa: BLE001 — defensive shutdown
             logger.debug("HTTP istemcisi kapatılırken hata yutuldu.", exc_info=True)
 
-        for agent in (self._gait, self._skin, self._respiration, self._thermal):
+        for agent in (
+            self._gait,
+            self._skin,
+            self._respiration,
+            self._thermal,
+            self._expression,
+        ):
             close_fn = getattr(agent, "close", None)
             if callable(close_fn):
                 try:
@@ -154,11 +162,13 @@ class Runner:
         skin_fut = self._executor.submit(self._skin.analyze, window)
         resp_fut = self._executor.submit(self._respiration.analyze, window)
         thermal_fut = self._executor.submit(self._thermal.analyze, window)
+        expression_fut = self._executor.submit(self._expression.analyze, window)
         gait_obs = gait_fut.result()
         skin_obs = skin_fut.result()
         resp_obs = resp_fut.result()
         thermal_obs = thermal_fut.result()
-        return _build_bundle(gait_obs, skin_obs, resp_obs, thermal_obs)
+        expression_obs = expression_fut.result()
+        return _build_bundle(gait_obs, skin_obs, resp_obs, thermal_obs, expression_obs)
 
     def _post_bundle(self, bundle: AgentBundle) -> None:
         url = f"{self.backend_url}{_TRIAGE_ENDPOINT}"
@@ -197,8 +207,15 @@ def _build_bundle(
     skin: AgentObservation,
     respiration: AgentObservation,
     thermal: AgentObservation,
+    expression: AgentObservation,
 ) -> AgentBundle:
-    return AgentBundle(gait=gait, skin=skin, respiration=respiration, thermal=thermal)
+    return AgentBundle(
+        gait=gait,
+        skin=skin,
+        respiration=respiration,
+        thermal=thermal,
+        expression=expression,
+    )
 
 
 # ============================================================== CLI plumbing

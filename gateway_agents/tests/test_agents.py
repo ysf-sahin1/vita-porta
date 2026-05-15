@@ -200,6 +200,61 @@ class TestRespirationAgent:
         assert slow_bpm > 0.0
 
 
+# =========================================================== ExpressionAgent
+
+
+class TestExpressionAgent:
+    def _agent(self):
+        pytest.importorskip("mediapipe")
+        from gateway_agents.agents.expression import ExpressionAgent
+
+        return ExpressionAgent()
+
+    def test_empty_window_returns_zero_confidence(self, empty_window: AnalysisWindow) -> None:
+        agent = self._agent()
+        try:
+            obs = agent.analyze(empty_window)
+        finally:
+            agent.close()
+        assert obs.agent == "expression"
+        assert obs.confidence == 0.0
+        # Insufficient path: belirsiz sınıf + sıfır pain.
+        assert obs.signals["expression_state"] == "belirsiz"
+        assert obs.signals["pain_score"] == 0.0
+
+    def test_black_frames_yield_low_confidence(self, black_window: AnalysisWindow) -> None:
+        agent = self._agent()
+        try:
+            obs = agent.analyze(black_window)
+        finally:
+            agent.close()
+        assert obs.agent == "expression"
+        # Siyah karelerde yüz mesh tespit edilemez → düşük güven.
+        assert obs.confidence < 0.5
+
+    def test_random_frames_do_not_crash(self) -> None:
+        agent = self._agent()
+        rng = np.random.default_rng(seed=0)
+        frames = [rng.integers(0, 256, (240, 320, 3), dtype=np.uint8) for _ in range(30)]
+        try:
+            obs = agent.analyze(AnalysisWindow(frames=frames, fps=15.0))
+        finally:
+            agent.close()
+        assert obs.agent == "expression"
+        assert 0.0 <= obs.confidence <= 0.55  # proxy modu üst sınırı
+        # Schema'da olması gereken anahtarlar her yolda mevcut olmalı.
+        expected = {
+            "expression_state",
+            "pain_score",
+            "eye_openness",
+            "face_asymmetry",
+            "consciousness_hint",
+            "face_detected_ratio",
+            "sensor_type",
+        }
+        assert expected.issubset(obs.signals.keys())
+
+
 # ===================================================== Schema conformance
 
 
@@ -227,12 +282,24 @@ def _respiration_obs() -> AgentObservation:
     return RespirationAgent().analyze(AnalysisWindow(frames=frames, fps=15.0))
 
 
+def _expression_obs() -> AgentObservation:
+    pytest.importorskip("mediapipe")
+    from gateway_agents.agents.expression import ExpressionAgent
+
+    agent = ExpressionAgent()
+    try:
+        return agent.analyze(AnalysisWindow(frames=_black_frames(15), fps=15.0))
+    finally:
+        agent.close()
+
+
 @pytest.mark.parametrize(
     "factory,expected_name",
     [
         (_gait_obs, "gait"),
         (_skin_obs, "skin"),
         (_respiration_obs, "respiration"),
+        (_expression_obs, "expression"),
     ],
 )
 def test_observation_schema_conformance(factory, expected_name: str) -> None:

@@ -63,6 +63,24 @@ export function inferAgentReason(obs: AgentObservation): AgentReason | null {
     return null;
   }
 
+  if (obs.agent === "expression") {
+    const sensor = String(signals.sensor_type ?? "");
+    const faceRatio = numericOrNull(signals.face_detected_ratio);
+    if (sensor === "geometric_proxy") {
+      return {
+        text: "Geometrik proxy modu — eğitilmiş ağrı sınıflandırıcı yerine landmark geometrisi kullanılıyor.",
+        severity: "info",
+      };
+    }
+    if (faceRatio !== null && faceRatio < 0.3) {
+      return { text: "Yüz mesh yakalanamadı — mimik analizi sınırlı.", severity: "warn" };
+    }
+    if (conf < MID_CONF) {
+      return { text: "İfade sinyali zayıf — kameraya bakılması gerekiyor.", severity: "warn" };
+    }
+    return null;
+  }
+
   return null;
 }
 

@@ -73,7 +73,7 @@ class MockLLMClient(LLMClient):
         by_agent: dict[str, dict] = {o["agent"]: o for o in observations}
         weights = {
             name: (by_agent[name]["confidence"] if name in by_agent else 0.0)
-            for name in ("gait", "skin", "respiration", "thermal")
+            for name in ("gait", "skin", "respiration", "thermal", "expression")
         }
 
         red_flags = 0
@@ -145,6 +145,49 @@ class MockLLMClient(LLMClient):
                 rationale_parts.append(
                     f"yürüyüş ajanı %{int(gait['confidence']*100)} "
                     "güvenle sallantılı yürüyüş tespit etti"
+                )
+
+        # Yüz ifadesi ajanı: geometrik proxy modunda destekleyici sinyal.
+        # Ağrı/bilinç/asimetri tek başına kırmızıya çekmez; başka anormallikle
+        # birleşince kırmızıya katkı verir.
+        expression = by_agent.get("expression")
+        if expression and expression["confidence"] >= 0.4:
+            signals = expression.get("signals", {})
+            state = signals.get("expression_state", "")
+            pain = float(signals.get("pain_score", 0.0))
+            asym = float(signals.get("face_asymmetry", 0.0))
+            consciousness = signals.get("consciousness_hint", "")
+
+            asymmetry_high = asym >= 0.6
+            consciousness_low = consciousness == "belirsiz"
+            pain_high = state == "ağrı" or pain >= 0.6
+
+            if asymmetry_high and (red_flags >= 1 or yellow_flags >= 1):
+                red_flags += 1
+                rationale_parts.append(
+                    "yüz ifadesi ajanı belirgin yüz asimetrisi bildirdi (felç şüphesi)"
+                )
+            elif consciousness_low and (red_flags >= 1 or yellow_flags >= 1):
+                red_flags += 1
+                rationale_parts.append(
+                    "yüz ifadesi ajanı bilinç kaybı şüphesi bildirdi"
+                )
+            elif pain_high:
+                # Ağrı tek başına sarı; başka anormallikle birleşirse kırmızı.
+                if red_flags >= 1 or yellow_flags >= 1:
+                    red_flags += 1
+                    rationale_parts.append(
+                        "yüz ifadesi ajanı belirgin ağrı bulguları bildirdi"
+                    )
+                else:
+                    yellow_flags += 1
+                    rationale_parts.append(
+                        "yüz ifadesi ajanı ağrı şüphesi bildirdi"
+                    )
+            elif state == "distres" or pain >= 0.3:
+                yellow_flags += 1
+                rationale_parts.append(
+                    "yüz ifadesi ajanı distres/rahatsızlık bildirdi"
                 )
 
         # Termal ajan: proxy modunda destekleyici sinyal, tek başına kırmızıya çekmez.
