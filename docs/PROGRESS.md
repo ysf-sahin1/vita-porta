@@ -2,7 +2,7 @@
 
 Bu dosya geliştirme oturumlarının kaldığı yerden devam edebilmesi için tutulur. Her faz: durum, neyin tamamlandığı, neyin kaldığı, ilgili dosyalar ve doğrulama yöntemi.
 
-**Genel durum (2026-05-16):**
+**Genel durum (2026-05-17):**
 - ✅ **Faz 0–5** tamamlandı (5 ajan: gait / skin / respiration / thermal / expression)
 - ✅ **Faz 4.5** (Health-OS frontend redesign) tamamlandı
 - ✅ **Faz 4.6** (hemşire giriş ekranı + anatomik radyal layout) tamamlandı
@@ -10,10 +10,10 @@ Bu dosya geliştirme oturumlarının kaldığı yerden devam edebilmesi için tu
 - ✅ **Faz 5.6** (yüz ifadesi ajanı eklenmesiyle Faz 5'in resmi kapanışı) tamamlandı
 - ✅ **Faz 5.7** (hemşire verdict persistance + mesai history + RAG deneyim katmanı) tamamlandı
 - ✅ **Faz 7** (uçtan uca canlı demo doğrulaması) tamamlandı
-- 🔴 **Faz 6** (edge firmware + Docker compose) başlanmadı — hackathon için opsiyonel
+- 🟡 **Faz 6** Aşama B (ESP32-CAM canlı MJPEG yayını) tamamlandı; gateway entegrasyonu + MQTT/Docker kaldı
 - 🔴 **Faz 8** (pitch polish + demo videosu yedek) başlanmadı
 
-Sistem **gerçek webcam'den canlı çalışıyor**: 5 görsel ajan paralel işliyor, supervisor karar üretiyor, dashboard SSE ile yayınlıyor. Webcam yoksa demo butonlarıyla 3 senaryo (kırmızı/sarı/yeşil) tetiklenebilir.
+Sistem **gerçek webcam'den canlı çalışıyor**: 5 görsel ajan paralel işliyor, supervisor karar üretiyor, dashboard SSE ile yayınlıyor. Webcam yoksa demo butonlarıyla 3 senaryo (kırmızı/sarı/yeşil) tetiklenebilir. ESP32-CAM ayrı bir yayın kaynağı olarak da hazır (HTTP/MJPEG; gateway adapter'ı eklenecek).
 
 Detaylı tur-tur değişiklik kayıtları için `docs/gelisme_ilerlemesi.md` dosyasına bakın.
 
@@ -173,20 +173,68 @@ python -m gateway_agents.runner --video docs/test_clip.mp4      # Video dosyası
 
 ---
 
-## Faz 6 — Edge firmware + Docker infrastructure · 🔴 Başlanmadı
+## Faz 6 — Edge firmware + Docker infrastructure · 🟡 Kısmen Tamamlandı
 
-- `edge_firmware/vita_porta_cam.ino` — ESP32-CAM Arduino sketch'i:
-  - I2S kamera başlat, Wi-Fi bağlan
-  - MQTT broker'a (`vitaporta/frames` topic'ine) JPEG frame yayımla
-  - WS2812 LED halka opsiyonel: triaj durumu görsel göstergesi (geri kanal)
-- `infrastructure/docker-compose.yml`:
-  - Mosquitto MQTT broker
+### Yapılanlar — Aşama B: ESP32-CAM canlı MJPEG yayını (2026-05-17)
+
+`edge_firmware/vita_porta_cam/vita_porta_cam.ino` — AI-Thinker ESP32-CAM için canlı video yayını:
+- Wi-Fi STA bağlantısı (kart açılırken bağlanır, IP Serial Monitor'da yazar)
+- İki HTTP sunucu çalışıyor:
+  - **Port 80** (Arduino `WebServer`): `/` canlı dashboard, `/capture` tek JPEG, `/info` JSON istatistik (FPS, RSSI, heap, uptime, kare boyutu)
+  - **Port 81** (`esp_http_server`): `/stream` MJPEG akışı (`multipart/x-mixed-replace`) — tek TCP bağlantısı sürekli açık, IP kameralarla aynı protokol
+- Tarayıcıda canlı önizleme + her saniye yenilenen metrikler
+- Serial Monitor'da her 5 sn `[STATS] FPS=... heap=... RSSI=...` raporu
+
+### Donanım için ampirik en iyi ayarlar (Robocombo AI-Thinker klonu, OV2640, 4MB PSRAM)
+
+Bu klon kartın PSRAM'i muhtemelen 40 MHz QSPI'de takılı (resmi AI-Thinker 80 MHz). Yapılan ölçümlerle:
+
+| Parametre | Değer | Neden |
+|-----------|-------|-------|
+| `xclk_freq_hz` | 16 MHz | 20 MHz'de OV2640 kararsız, FPS düşüyor |
+| `frame_size` | FRAMESIZE_VGA (640×480) | MediaPipe Face Mesh + Pose için minimum |
+| `jpeg_quality` | 12 | 14+ DSP'de tıkanma (FPS çöküyor) |
+| `fb_count` | 1 | 2'de PSRAM bandwidth çakışıyor (FPS 10→3) |
+| `grab_mode` | CAMERA_GRAB_WHEN_EMPTY | Kanonik CameraWebServer ile aynı |
+
+**Ölçülen performans:** VGA 640×480 @ ~10 FPS, kare boyutu 25-35 KB, RSSI -39 dBm, heap 140-152 KB stabil. 3 sn pencere = 30 kare → MediaPipe Pose, Face Mesh ve optical flow respiration için yeterli.
+
+### Aşama A — KY-016 RGB LED diagnostik (ertelendi)
+
+KY-016 RGB LED'in triaj durum göstergesi olarak kullanılması için diagnostik kod yazıldı (IO13/14/15 + GND, flash LED IO4 GPIO testi). Donanım üzerinde LED tek başına ve ESP32 GPIO çıkışları sağlam olmasına rağmen breadboard üzerinden bağlantı kurulamadı (kablo/breadboard temas sorunu olduğu kuvvetle muhtemel). Vision agent entegrasyonu öncelikli olduğu için LED ertelendi; ileride **WS2812 LED halka** veya KY-016 ile triaj göstergesi tekrar ele alınacak.
+
+### Dosyalar
+```
+edge_firmware/vita_porta_cam/vita_porta_cam.ino
+docs/Ekran görüntüsü 2026-05-16 213536.png   (ESP32-CAM breadboard bağlantı referansı)
+```
+
+### Doğrulama
+
+```bash
+# Arduino IDE'de yükle (Board: AI Thinker ESP32-CAM, PSRAM auto-enabled).
+# Serial Monitor (115200 baud) açıkken IP'yi gör, sonra:
+
+curl http://<ESP32_IP>/info                  # JSON istatistik
+# Tarayıcıda:
+http://<ESP32_IP>/                           # canlı dashboard + metrikler
+http://<ESP32_IP>:81/stream                  # ham MJPEG akışı (cv2.VideoCapture buradan tüketir)
+```
+
+### Yapılacaklar
+- 🔴 `gateway_agents/io/esp_cam.py` — MJPEG stream consumer: `cv2.VideoCapture("http://<IP>:81/stream")` ile `FrameSource` sözleşmesini sağlar. Runner'a `--esp <IP>` parametresi eklenir.
+- 🔴 `infrastructure/docker-compose.yml`:
+  - Mosquitto MQTT broker (alternatif transport olarak)
   - ChromaDB (opsiyonel; in-memory ile başlanabilir)
   - Backend + Frontend servisleri (production build)
-- `infrastructure/mosquitto/mosquitto.conf` — anonymous allow, port 1883
+- 🔴 `infrastructure/mosquitto/mosquitto.conf` — anonymous allow, port 1883
+- 🔴 `edge_firmware/README.md` — Wi-Fi config talimatı, Arduino IDE board ayarları, upload protokolü
+- 🟡 LED halka (WS2812 veya KY-016) triaj göstergesi (öncelik düşük; kapı durumu UI'da zaten görünüyor)
 
-**Notlar:**
-- Hackathon demosu için **fiziksel ESP32-CAM şart değil**. Webcam fallback yeterli. Donanım masa üzerinde "veri toplama konseptini" göstermek için durur.
+### Notlar
+- **Wi-Fi credentials repo'ya commit edilmiyor.** Sketch'te placeholder bırakıldı (`WIFI_ADIN_BURAYA`, `WIFI_SIFRESI_BURAYA`); geliştirme makinasında manuel doldurulur. İleride `secrets.h` + `.gitignore` ile düzgün ayrılacak.
+- AI-Thinker klon kartlarda VGA için 10 FPS tavanı; gerçek üreticilerde (Espressif resmi, M5Stack) 18-25 FPS bekleniyor. Hackathon donanımı için kabul edilebilir.
+- ESP32-CAM şart değil — webcam fallback (`WebcamSource`) çalışmaya devam ediyor. Hackathon demosu için fiziksel ESP32-CAM zorunlu değil; donanım masa üzerinde "veri toplama konseptini" göstermek için durur.
 - Docker compose hackathon submission için bonus puan.
 
 ---
