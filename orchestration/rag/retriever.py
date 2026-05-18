@@ -71,9 +71,14 @@ class ChromaRetriever:
 
 
 def build_default_retriever() -> RagRetriever:
-    """Hackathon default: in-memory. Pilot phase swaps in ChromaRetriever."""
-    import os
-    return ChromaRetriever(
-    persist_dir=os.getenv("CHROMA_PERSIST_DIR", "./.chroma"),
-    embedding_model=os.getenv("EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-)
+    """ChromaDB retriever with in-memory fallback when Chroma is unavailable."""
+    try:
+        from orchestration.config import get_settings
+
+        settings = get_settings()
+        return ChromaRetriever(
+            persist_dir=settings.chroma_persist_dir,
+            embedding_model=settings.embedding_model,
+        )
+    except Exception:
+        return InMemoryRetriever()

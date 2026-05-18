@@ -11,6 +11,7 @@ CLI usage::
     python -m gateway_agents.runner --video data/demo/red.mp4
     python -m gateway_agents.runner --webcam 0
     python -m gateway_agents.runner --mqtt
+    python -m gateway_agents.runner --esp 192.168.1.42
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ from gateway_agents.agents import (
     SkinAgent,
     ThermalAgent,
 )
-from gateway_agents.io import FrameSource, VideoFileSource, WebcamSource
+from gateway_agents.io import EspCamSource, FrameSource, VideoFileSource, WebcamSource
 from orchestration.schemas import AgentBundle, AgentObservation
 
 logger = logging.getLogger("vita_porta.runner")
@@ -225,10 +226,11 @@ def _make_source(args: argparse.Namespace) -> FrameSource:
     if args.video is not None:
         return VideoFileSource(path=args.video, loop=args.loop)
     if args.mqtt:
-        # Lazy import — paho-mqtt is optional at runtime.
         from gateway_agents.io.mqtt import MqttSource
 
         return MqttSource()
+    if args.esp is not None:
+        return EspCamSource(host=args.esp, fallback_webcam=True)
     return WebcamSource(device_index=args.webcam)
 
 
@@ -258,6 +260,13 @@ def _build_argparser() -> argparse.ArgumentParser:
         action="store_true",
         help="Edge cihazından MQTT üzerinden frame al.",
     )
+    src.add_argument(
+        "--esp",
+        type=str,
+        default=None,
+        metavar="IP",
+        help="ESP32-CAM IP adresi (ör. 192.168.1.42). Stream: http://<IP>:81/stream",
+    )
     parser.add_argument("--loop", action="store_true", help="Video sonsuz döngüde oynatılsın.")
     parser.add_argument("--backend", type=str, default="http://127.0.0.1:8000")
     parser.add_argument("--window", type=float, default=3.0, help="Pencere süresi (sn).")
@@ -274,14 +283,14 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s | %(message)s",
     )
 
-    # Default to webcam 0 if nothing was specified.
-    if args.video is None and args.webcam is None and not args.mqtt:
+    # Default to webcam 0 if no source was specified.
+    if args.video is None and args.webcam is None and not args.mqtt and args.esp is None:
         args.webcam = 0
 
     source_label = (
         f"video={args.video}"
         if args.video is not None
-        else ("mqtt" if args.mqtt else f"webcam={args.webcam}")
+        else ("mqtt" if args.mqtt else (f"esp={args.esp}" if args.esp else f"webcam={args.webcam}"))
     )
     logger.info(
         "Vita Porta runner başlatılıyor — kaynak: %s, hedef: %s",
