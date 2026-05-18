@@ -72,5 +72,8 @@ class ChromaRetriever:
 
 def build_default_retriever() -> RagRetriever:
     """Hackathon default: in-memory. Pilot phase swaps in ChromaRetriever."""
-
-    return InMemoryRetriever()
+    import os
+    return ChromaRetriever(
+    persist_dir=os.getenv("CHROMA_PERSIST_DIR", "./.chroma"),
+    embedding_model=os.getenv("EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+)
