@@ -1,8 +1,8 @@
 """Gateway orchestrator.
 
 Reads frames from a ``FrameSource``, groups them into ``window_duration_s``
-analysis windows, fans the four visual agents (gait, skin, respiration,
-thermal) out across a thread pool, and POSTs the resulting :class:`AgentBundle`
+analysis windows, fans the three visual agents (gait, thermal, expression)
+out across a thread pool, and POSTs the resulting :class:`AgentBundle`
 to the backend's ``/api/triage/run`` endpoint.
 
 CLI usage::
@@ -11,6 +11,7 @@ CLI usage::
     python -m gateway_agents.runner --video data/demo/red.mp4
     python -m gateway_agents.runner --webcam 0
     python -m gateway_agents.runner --mqtt
+    python -m gateway_agents.runner --esp 192.168.1.42
 """
 
 from __future__ import annotations
@@ -27,11 +28,9 @@ from gateway_agents.agents import (
     AnalysisWindow,
     ExpressionAgent,
     GaitAgent,
-    RespirationAgent,
-    SkinAgent,
     ThermalAgent,
 )
-from gateway_agents.io import FrameSource, VideoFileSource, WebcamSource
+from gateway_agents.io import EspCamSource, FrameSource, VideoFileSource, WebcamSource
 from orchestration.schemas import AgentBundle, AgentObservation
 
 logger = logging.getLogger("vita_porta.runner")
@@ -41,14 +40,14 @@ _HTTP_TIMEOUT_S = 10.0
 
 
 class Runner:
-    """Pulls frames, runs five agents in parallel, posts the bundle to the backend."""
+    """Pulls frames, runs three agents in parallel, posts the bundle to the backend."""
 
     def __init__(
         self,
         source: FrameSource,
         backend_url: str = "http://127.0.0.1:8000",
         window_duration_s: float = 3.0,
-        max_workers: int = 5,
+        max_workers: int = 3,
     ) -> None:
         self.source = source
         self.backend_url = backend_url.rstrip("/")
@@ -58,8 +57,6 @@ class Runner:
         self._http = httpx.Client(timeout=_HTTP_TIMEOUT_S)
 
         self._gait = GaitAgent()
-        self._skin = SkinAgent()
-        self._respiration = RespirationAgent()
         self._thermal = ThermalAgent()
         self._expression = ExpressionAgent()
 
@@ -113,8 +110,6 @@ class Runner:
 
         for agent in (
             self._gait,
-            self._skin,
-            self._respiration,
             self._thermal,
             self._expression,
         ):
@@ -159,16 +154,12 @@ class Runner:
 
     def _analyze(self, window: AnalysisWindow) -> AgentBundle:
         gait_fut = self._executor.submit(self._gait.analyze, window)
-        skin_fut = self._executor.submit(self._skin.analyze, window)
-        resp_fut = self._executor.submit(self._respiration.analyze, window)
         thermal_fut = self._executor.submit(self._thermal.analyze, window)
         expression_fut = self._executor.submit(self._expression.analyze, window)
         gait_obs = gait_fut.result()
-        skin_obs = skin_fut.result()
-        resp_obs = resp_fut.result()
         thermal_obs = thermal_fut.result()
         expression_obs = expression_fut.result()
-        return _build_bundle(gait_obs, skin_obs, resp_obs, thermal_obs, expression_obs)
+        return _build_bundle(gait_obs, thermal_obs, expression_obs)
 
     def _post_bundle(self, bundle: AgentBundle) -> None:
         url = f"{self.backend_url}{_TRIAGE_ENDPOINT}"
@@ -204,15 +195,11 @@ class Runner:
 
 def _build_bundle(
     gait: AgentObservation,
-    skin: AgentObservation,
-    respiration: AgentObservation,
     thermal: AgentObservation,
     expression: AgentObservation,
 ) -> AgentBundle:
     return AgentBundle(
         gait=gait,
-        skin=skin,
-        respiration=respiration,
         thermal=thermal,
         expression=expression,
     )
@@ -225,10 +212,11 @@ def _make_source(args: argparse.Namespace) -> FrameSource:
     if args.video is not None:
         return VideoFileSource(path=args.video, loop=args.loop)
     if args.mqtt:
-        # Lazy import — paho-mqtt is optional at runtime.
         from gateway_agents.io.mqtt import MqttSource
 
         return MqttSource()
+    if args.esp is not None:
+        return EspCamSource(host=args.esp, fallback_webcam=True)
     return WebcamSource(device_index=args.webcam)
 
 
@@ -258,6 +246,13 @@ def _build_argparser() -> argparse.ArgumentParser:
         action="store_true",
         help="Edge cihazından MQTT üzerinden frame al.",
     )
+    src.add_argument(
+        "--esp",
+        type=str,
+        default=None,
+        metavar="IP",
+        help="ESP32-CAM IP adresi (ör. 192.168.1.42). Stream: http://<IP>:81/stream",
+    )
     parser.add_argument("--loop", action="store_true", help="Video sonsuz döngüde oynatılsın.")
     parser.add_argument("--backend", type=str, default="http://127.0.0.1:8000")
     parser.add_argument("--window", type=float, default=3.0, help="Pencere süresi (sn).")
@@ -274,14 +269,14 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s | %(message)s",
     )
 
-    # Default to webcam 0 if nothing was specified.
-    if args.video is None and args.webcam is None and not args.mqtt:
+    # Default to webcam 0 if no source was specified.
+    if args.video is None and args.webcam is None and not args.mqtt and args.esp is None:
         args.webcam = 0
 
     source_label = (
         f"video={args.video}"
         if args.video is not None
-        else ("mqtt" if args.mqtt else f"webcam={args.webcam}")
+        else ("mqtt" if args.mqtt else (f"esp={args.esp}" if args.esp else f"webcam={args.webcam}"))
     )
     logger.info(
         "Vita Porta runner başlatılıyor — kaynak: %s, hedef: %s",

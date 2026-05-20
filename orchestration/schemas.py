@@ -36,7 +36,7 @@ class AgentObservation(BaseModel):
     card; signals carry the machine-readable details the supervisor reasons over.
     """
 
-    agent: Literal["gait", "skin", "respiration", "thermal", "expression"]
+    agent: Literal["gait", "thermal", "expression"]
     confidence: float = Field(ge=0.0, le=1.0)
     summary_tr: str = Field(description="Hemşireye gösterilecek tek cümlelik Türkçe gözlem")
     signals: dict[str, float | str | bool] = Field(default_factory=dict)
@@ -55,20 +55,12 @@ class AgentBundle(BaseModel):
 
     patient_id: str = Field(default_factory=lambda: uuid4().hex[:8])
     gait: AgentObservation | None = None
-    skin: AgentObservation | None = None
-    respiration: AgentObservation | None = None
     thermal: AgentObservation | None = None
     expression: AgentObservation | None = None
     captured_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     def observations(self) -> list[AgentObservation]:
-        candidates = (
-            self.gait,
-            self.skin,
-            self.respiration,
-            self.thermal,
-            self.expression,
-        )
+        candidates = (self.gait, self.thermal, self.expression)
         return [obs for obs in candidates if obs is not None]
 
 
@@ -181,6 +173,26 @@ class NurseFeedback(BaseModel):
             feedback_at=self.feedback_at,
             similarity_score=similarity_score,
         )
+
+
+class NurseSession(BaseModel):
+    """Hemşire mesai oturumu — giriş ve (varsa) çıkış zamanı.
+
+    Frontend `LoginScreen` submit'ettiğinde `start` endpoint çağrılır,
+    backend `session_id` üretir ve `logout_at=None` ile satırı yazar.
+    Hemşire "Çıkış" butonuna bastığında `end` endpoint çağrılır, aynı
+    `session_id` ile `logout_at=now` olan yeni satır append edilir.
+    ``JsonSessionStore.list_all`` aynı session_id için son satırı döndürür
+    (override mantığı), böylece kapalı oturumlar logout zamanıyla, açık
+    oturumlar None ile listede görünür.
+    """
+
+    session_id: str
+    nurse_first_name: str
+    nurse_last_name: str
+    hospital: str
+    login_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    logout_at: datetime | None = None
 
 
 class TriageEvent(BaseModel):

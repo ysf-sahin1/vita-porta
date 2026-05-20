@@ -1,5 +1,6 @@
 "use client";
 
+import { startSessionApi } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { setSession, type NurseSession } from "@/lib/session";
 import { Building2, ShieldCheck, User } from "lucide-react";
@@ -14,21 +15,37 @@ export function LoginScreen({ onReady }: LoginScreenProps) {
   const [lastName, setLastName] = useState("");
   const [hospital, setHospital] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const trimmedFirst = firstName.trim();
   const trimmedLast = lastName.trim();
   const trimmedHospital = hospital.trim();
   const allValid = trimmedFirst.length >= 2 && trimmedLast.length >= 2 && trimmedHospital.length >= 2;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitted(true);
-    if (!allValid) return;
+    if (!allValid || busy) return;
+    setBusy(true);
+    let sessionId: string | undefined;
+    try {
+      const record = await startSessionApi({
+        firstName: trimmedFirst,
+        lastName: trimmedLast,
+        hospital: trimmedHospital,
+      });
+      sessionId = record.session_id;
+    } catch (err) {
+      // Backend ulaşılamazsa lokal session ile devam — UI'yi kilitlemeyelim.
+      console.warn("[LoginScreen] startSession başarısız, lokal devam:", err);
+    }
     const s = setSession({
       firstName: trimmedFirst,
       lastName: trimmedLast,
       hospital: trimmedHospital,
+      sessionId,
     });
+    setBusy(false);
     onReady(s);
   };
 
@@ -87,16 +104,16 @@ export function LoginScreen({ onReady }: LoginScreenProps) {
 
         <button
           type="submit"
-          disabled={submitted && !allValid}
+          disabled={busy || (submitted && !allValid)}
           className={cn(
             "mt-7 w-full rounded-2xl py-3 font-semibold tracking-tight transition-all",
             "bg-gradient-to-r from-slate-900 to-slate-700 text-white shadow-glass",
             "hover:from-slate-800 hover:to-slate-600",
             "focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:outline-none",
-            submitted && !allValid && "opacity-60 cursor-not-allowed",
+            (busy || (submitted && !allValid)) && "opacity-60 cursor-not-allowed",
           )}
         >
-          Triaj ekranına geç
+          {busy ? "Mesai kaydediliyor…" : "Triaj ekranına geç"}
         </button>
 
         <p className="text-[11px] text-slate-400 mt-5 leading-relaxed text-center">

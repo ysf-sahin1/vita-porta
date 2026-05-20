@@ -4,11 +4,11 @@ import { cn } from "@/lib/cn";
 import type { AgentObservation, TriageCategory } from "@/lib/types";
 import { AgentCard, type Agent } from "./AgentPanel";
 
-// Anatomik radyal yerleşim:
+// Anatomik radyal yerleşim (3 ajan):
 //   ┌──────────────────────────────┐
 //   │ [Expression]   [Thermal]     │
 //   │           \   /              │
-//   │   [Skin]── 🧍 ──[Respiration]│
+//   │            🧍                │
 //   │           /                  │
 //   │       [Gait]                 │
 //   └──────────────────────────────┘
@@ -33,8 +33,6 @@ const CONNECTIONS: Record<
 > = {
   expression: { from: [28, 14], to: [47, 8], color: "#a78bfa" },   // kafa sol
   thermal:    { from: [72, 14], to: [53, 8], color: "#fb923c" },   // alın
-  skin:       { from: [28, 36], to: [46, 11], color: "#fb7185" },  // yanak
-  respiration:{ from: [72, 36], to: [54, 24], color: "#38bdf8" },  // göğüs
   gait:       { from: [50, 56], to: [50, 50], color: "#818cf8" },  // bacaklar
 };
 
@@ -42,8 +40,6 @@ const CONNECTIONS: Record<
 const CARD_POSITIONS: Record<Agent, { left: string; top: string }> = {
   expression: { left: "0%",  top: "3%"  },
   thermal:    { left: "72%", top: "3%"  },
-  skin:       { left: "0%",  top: "47%" },
-  respiration:{ left: "72%", top: "47%" },
   gait:       { left: "36%", top: "82%" },
 };
 
@@ -133,10 +129,6 @@ function SilhouetteVector({
   const swaying = !!(gait?.signals?.sway_detected || gait?.signals?.sway);
   const asymmetric = String(gait?.signals?.symmetry_status ?? "") === "anormal";
 
-  // Solunum ajanı göğüs hareketi (animasyon hızı)
-  const resp = observations.respiration;
-  const breathing = !!resp && resp.confidence > 0.3;
-
   // viewBox 100x60; silüet ortada cx=50
   // Kafa cy=8, omuz cy=18, göğüs cy=26, bel cy=36, ayak cy=52
   const cx = 50;
@@ -178,7 +170,7 @@ function SilhouetteVector({
         strokeWidth={0.6}
         strokeLinecap="round"
       />
-      {/* Gövde (göğüs nefes alır gibi pulse) */}
+      {/* Gövde */}
       <line
         x1={cx}
         y1={14}
@@ -187,7 +179,6 @@ function SilhouetteVector({
         stroke={stroke}
         strokeWidth={0.7}
         strokeLinecap="round"
-        className={breathing ? "animate-chestBreathe" : ""}
       />
       {/* Kollar */}
       <line

@@ -2,18 +2,20 @@
 
 Bu dosya geliştirme oturumlarının kaldığı yerden devam edebilmesi için tutulur. Her faz: durum, neyin tamamlandığı, neyin kaldığı, ilgili dosyalar ve doğrulama yöntemi.
 
-**Genel durum (2026-05-17):**
-- ✅ **Faz 0–5** tamamlandı (5 ajan: gait / skin / respiration / thermal / expression)
+**Genel durum (2026-05-20):**
+- ✅ **Faz 0–5** tamamlandı (artık 3 ajan: gait / thermal / expression — bkz. Faz 5.9)
 - ✅ **Faz 4.5** (Health-OS frontend redesign) tamamlandı
 - ✅ **Faz 4.6** (hemşire giriş ekranı + anatomik radyal layout) tamamlandı
 - ✅ **Faz 5.5** (origin/main Phase 5 rewrite ile birleşme) tamamlandı
 - ✅ **Faz 5.6** (yüz ifadesi ajanı eklenmesiyle Faz 5'in resmi kapanışı) tamamlandı
 - ✅ **Faz 5.7** (hemşire verdict persistance + mesai history + RAG deneyim katmanı) tamamlandı
+- ✅ **Faz 5.8** (feedback loop + decision schema + backend API)
+- ✅ **Faz 5.9** (3 ajan sadeleştirmesi + hemşire mesai panel) — yeni
 - ✅ **Faz 7** (uçtan uca canlı demo doğrulaması) tamamlandı
-- 🟡 **Faz 6** Aşama B (ESP32-CAM canlı MJPEG yayını) tamamlandı; gateway entegrasyonu + MQTT/Docker kaldı
+- 🟡 **Faz 6** Aşama B (ESP32-CAM canlı MJPEG yayın + gateway `--esp` entegrasyonu) tamamlandı; MQTT/Docker kaldı
 - 🔴 **Faz 8** (pitch polish + demo videosu yedek) başlanmadı
 
-Sistem **gerçek webcam'den canlı çalışıyor**: 5 görsel ajan paralel işliyor, supervisor karar üretiyor, dashboard SSE ile yayınlıyor. Webcam yoksa demo butonlarıyla 3 senaryo (kırmızı/sarı/yeşil) tetiklenebilir. ESP32-CAM ayrı bir yayın kaynağı olarak da hazır (HTTP/MJPEG; gateway adapter'ı eklenecek).
+Sistem **gerçek webcam'den canlı çalışıyor**: 3 görsel ajan (gait/thermal/expression) paralel işliyor, supervisor karar üretiyor, dashboard SSE ile yayınlıyor. Hemşire login/logout zamanları `.sessions/sessions.jsonl`'ye kalıcı yazılıyor, dashboard'da popover'da görünüyor. ESP32-CAM ikinci bir yayın kaynağı olarak da hazır (HTTP/MJPEG; `--esp` CLI ile gateway runner'a bağlanır). Webcam yoksa demo butonlarıyla 3 senaryo (kırmızı/sarı/yeşil) tetiklenebilir.
 
 Detaylı tur-tur değişiklik kayıtları için `docs/gelisme_ilerlemesi.md` dosyasına bakın.
 
@@ -317,6 +319,45 @@ Webcam / ESP32-CAM ──► AnalysisWindow (3sn pencere)
          anthropic /
           openai)
 ```
+
+---
+
+## Faz 5.9 — 3 ajan sadeleştirmesi + hemşire mesai paneli · ✅ Tamamlandı (2026-05-20)
+
+**Bağlam:** Pipeline 5 ajandan (gait/skin/respiration/thermal/expression) **3 ajana** indirildi: yürüyüş + termal + yüz ifadesi. Ten Rengi (skin) ve Solunum (respiration) ajanları tamamen kaldırıldı — kapı kamerasında 3 sn'lik pencerede güvenilir sinyal vermeleri pratikte sınırlıydı; kalan üç ajan çoklu-modalite ESI kararı için yeterli kapsam veriyor. Ayrıca hangi hemşirenin ne zaman mesaiye girip çıktığını dashboard'dan görmek için kalıcı mesai paneli eklendi.
+
+**Yapılanlar — 3 ajan refactor:**
+- `orchestration/schemas.py` — `AgentObservation.agent` Literal `("gait", "thermal", "expression")`'a daraltıldı; `AgentBundle` 'den `skin` ve `respiration` alanları kaldırıldı; `observations()` 3'lü tuple döndürüyor.
+- `gateway_agents/agents/skin.py` ve `respiration.py` **silindi**. `__init__.py` export'ları temizlendi.
+- `gateway_agents/runner.py` — paralel pipeline 3 ajana indi (ThreadPoolExecutor `max_workers=3`), `_build_bundle` 3 arg, docstring güncel.
+- `orchestration/llm.py` (MockLLMClient) — skin ve respiration heuristic blokları silindi. **Gait `severity:"high"` kuralı yeniden kalibre edildi** → 3 ajanlı dünyada `red_flag` ekliyor (mevcut kuralla `critical_case` artık sadece skin/resp ile red'e ulaşamaz, gait severity:high primary red sinyali). Weights tuple 3 ajana indi.
+- `orchestration/prompts/supervisor.py` — system prompt "üç bağımsız görsel ajan" (Yürüyüş/Termal/Yüz İfadesi); per_agent_weights JSON template 3 anahtar; ESI red/yellow/green açıklamaları 3-ajan dünyasına göre yeniden yazıldı; `missing_agents` set 3 elemana indi.
+- `orchestration/demo.py` — `critical_case` / `ambiguous_case` / `stable_case` artık sadece 3 ajan AgentObservation içeriyor.
+- Frontend: `lib/types.ts`, `components/AgentPanel.tsx`, `components/HistoryDetailModal.tsx`, `components/AnatomicalRadial.tsx`, `components/TriageCard.tsx`, `components/useTriageStream.ts`, `lib/agentReasons.ts` — Agent union ve AGENT_META 3 ajana indi; AnatomicalRadial'da skin & respiration kart pozisyonları ve bağlantı çizgileri kaldırıldı (silüet ortada, expression sol-üst, thermal sağ-üst, gait alt-orta); silüet vektöründen respiration breathing animasyonu çıkarıldı; TriageCard ajan ağırlık grid'i 5 sütundan 3 sütuna.
+- Testler: `gateway_agents/tests/test_agents.py` skin/respiration sınıfları silindi (kalan: gait + expression + 2 schema conformance); `test_runner.py` "five_observations" → "three_observations"; `test_supervisor.py::test_low_confidence_is_demoted` skin → gait observation'a çevrildi.
+- `PROJECT_EXPLORER.md` — sağlık özeti, dosya ağacı ve faz log'ları "3 ajan" referansına güncellendi (geçmiş faz kayıtları korundu).
+- **Veri temizliği**: `.decisions/decisions.jsonl` → `.5agent.bak`, `.feedback/feedbacks.jsonl` → `.5agent.bak`. Yeni pydantic Literal eski snapshot'lardaki "skin"/"respiration" entry'lerini validate edemediği için yedeklendi; istenirse geri alınabilir (schema esnetilmesi gerekir).
+
+**Yapılanlar — Hemşire mesai paneli:**
+- `orchestration/schemas.py` — yeni `NurseSession` modeli (`session_id` + first/last name + hospital + `login_at` + `logout_at: datetime | None`). Session aktif iken `logout_at=None`.
+- `orchestration/sessions_store.py` — **yeni dosya**. `JsonSessionStore` decisions/feedback pattern'i ile birebir; aynı `session_id` için son satır override eder, ``list_all`` her oturum için kapanış varsa kapanışlı satırı döner. Append-only JSONL: `.sessions/sessions.jsonl`.
+- `backend_api/app/main.py` — 3 yeni endpoint: `POST /api/sessions/start` (NurseSession dönderir), `POST /api/sessions/end` (idempotent — bilinmeyen id sessizce 200), `GET /api/sessions?limit=20` (en yeni önce). `lifespan` 'a `sessions_store` eklendi.
+- Frontend `lib/api.ts` — `startSessionApi`, `endSessionApi` (best-effort, fail-silent), `fetchSessions` helpers. `lib/types.ts` — `NurseSessionRecord` interface. `lib/session.ts` — localStorage'a `sessionId` field eklendi.
+- `components/LoginScreen.tsx` — submit async oldu; backend'e `start` POST eder, dönen `session_id`'yi localStorage'a yazar. "Mesai kaydediliyor…" disabled state.
+- `components/SessionGate.tsx` — `logout()` artık önce `endSessionApi(sessionId)` (best-effort) sonra localStorage clear.
+- `components/Header.tsx` — LiveClock yanına `<ShiftHistoryPopover>` eklendi. Header'a `relative z-20` verildi — backdrop-blur stacking context sebebiyle HistoryList kartının altında kalan popover bu fix'le üste taşındı.
+- `components/ShiftHistoryPopover.tsx` — **yeni dosya**. Header'da `Mesai` pill butonu (lucide `History` ikonu) + aktif oturum sayısı badge. Tıklayınca 360px dropdown açılır; her satırda hemşire adı + "(Siz)" rozeti + hastane + `dd.MM HH:mm → HH:mm` giriş→çıkış + süre (`23 dk` / `2 sa 14 dk`) + yeşil "Aktif" / gri "Kapandı" rozeti. Açıkken 15 sn'de bir poll eder; dışına tıklayınca ya da Escape ile kapanır.
+
+**Doğrulama:**
+- ✅ Backend test suite: **19/19 pass** (3 ajan refactor sonrası gait kalibrasyonu ile)
+- ✅ Frontend `tsc --noEmit` clean
+- ✅ `python -m orchestration.demo` → 3 senaryo doğru kategori (red/yellow/green); `per_agent_weights` artık 3 anahtar
+- ✅ `POST /api/sessions/start` → uuid id + login_at; `POST /api/sessions/end` → logout damgalı override; `GET /api/sessions` → en yeni önce sıralı liste
+- ✅ Canlı dashboard: login → header'da "Mesai" butonu + aktif oturum badge; popover açıldığında kullanıcı kendi oturumunu "Aktif/Siz" olarak görür; logout sonrası satır "Kapandı" + süreli görünür
+
+**Açık takipler:**
+- Mesai oturumu için otomatik kapanış (sertçe sekme kapatılırsa hâlâ "Aktif" görünür) — basit cron veya 24sa idle endpoint'iyle çözülebilir; opsiyonel.
+- Eski 5-ajanlı yedek JSONL kayıtlarını yeni schema'ya migrate eden bir adapter — istenirse skin/respiration entry'leri ignore edilerek import edilebilir.
 
 ---
 

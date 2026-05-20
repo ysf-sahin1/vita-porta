@@ -12,7 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { type Verdict } from "./NurseVerdict";
 import { useNurseSession } from "./SessionGate";
 
-type AgentKey = "gait" | "skin" | "respiration" | "thermal" | "expression";
+type AgentKey = "gait" | "thermal" | "expression";
 type Observations = Partial<Record<AgentKey, AgentObservation>>;
 
 export interface PatientState {

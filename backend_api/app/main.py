@@ -5,6 +5,9 @@ Endpoints:
   POST /api/triage/run          — submit an agent bundle, get a decision
   GET  /api/triage/stream       — SSE stream of agent observations + decisions
   POST /api/triage/demo         — fire the three canonical demo bundles
+  POST /api/sessions/start      — hemşire mesai başlangıcı (login)
+  POST /api/sessions/end        — hemşire mesai sonu (logout)
+  GET  /api/sessions            — hemşire mesai geçmişi (header popover)
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from backend_api.app.event_bus import EventBus
@@ -30,6 +34,7 @@ from orchestration.schemas import (
     TriageDecision,
     TriageEvent,
 )
+from orchestration.sessions_store import build_default_session_store
 from orchestration.supervisor import Supervisor
 
 logger = logging.getLogger("vita_porta")
@@ -41,6 +46,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.event_bus = EventBus()
     app.state.feedback_store = build_default_store()
     app.state.decisions_store = build_default_decision_store()
+    app.state.sessions_store = build_default_session_store()
     app.state.supervisor = Supervisor(feedback_store=app.state.feedback_store)
     logger.info("Vita Porta backend hazır.")
     yield
@@ -157,6 +163,57 @@ async def reset_history() -> None:
     app.state.decisions_store.clear()
     app.state.feedback_store.clear()
     logger.info("Karar ve feedback geçmişi sıfırlandı.")
+
+
+class _SessionStartBody(BaseModel):
+    first_name: str = Field(min_length=1)
+    last_name: str = Field(min_length=1)
+    hospital: str = Field(min_length=1)
+
+
+class _SessionEndBody(BaseModel):
+    session_id: str = Field(min_length=1)
+
+
+@app.post("/api/sessions/start")
+async def start_session(body: _SessionStartBody) -> dict:
+    record = app.state.sessions_store.start(
+        first_name=body.first_name,
+        last_name=body.last_name,
+        hospital=body.hospital,
+    )
+    logger.info(
+        "Mesai başladı: %s %s @ %s (id=%s)",
+        record.nurse_first_name,
+        record.nurse_last_name,
+        record.hospital,
+        record.session_id,
+    )
+    return record.model_dump(mode="json")
+
+
+@app.post("/api/sessions/end")
+async def end_session(body: _SessionEndBody) -> dict:
+    record = app.state.sessions_store.end(body.session_id)
+    if record is None:
+        # Bilinmeyen session_id — sessizce 200 dön, idempotent davranış.
+        return {"closed": False, "session_id": body.session_id}
+    logger.info(
+        "Mesai bitti: %s %s (id=%s)",
+        record.nurse_first_name,
+        record.nurse_last_name,
+        record.session_id,
+    )
+    return {"closed": True, "session": record.model_dump(mode="json")}
+
+
+@app.get("/api/sessions")
+async def list_sessions(limit: int = 20) -> dict[str, list[dict]]:
+    """Header popover için son N mesai oturumu (en yeni önce)."""
+
+    records = app.state.sessions_store.list_all()
+    limited = records[: max(1, min(limit, 200))]
+    return {"sessions": [r.model_dump(mode="json") for r in limited]}
 
 
 @app.post("/api/triage/demo")

@@ -1,7 +1,7 @@
 export type TriageCategory = "red" | "yellow" | "green" | "insufficient";
 
 export interface AgentObservation {
-  agent: "gait" | "skin" | "respiration" | "thermal" | "expression";
+  agent: "gait" | "thermal" | "expression";
   confidence: number;
   summary_tr: string;
   signals: Record<string, number | string | boolean>;
@@ -58,6 +58,15 @@ export interface DecisionRecord {
 export interface HistoryResponse {
   decisions: DecisionRecord[];
   feedback: NurseFeedback[];
+}
+
+export interface NurseSessionRecord {
+  session_id: string;
+  nurse_first_name: string;
+  nurse_last_name: string;
+  hospital: string;
+  login_at: string;
+  logout_at: string | null;
 }
 
 export type TriageEvent =

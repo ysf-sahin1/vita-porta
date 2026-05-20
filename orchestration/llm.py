@@ -73,60 +73,17 @@ class MockLLMClient(LLMClient):
         by_agent: dict[str, dict] = {o["agent"]: o for o in observations}
         weights = {
             name: (by_agent[name]["confidence"] if name in by_agent else 0.0)
-            for name in ("gait", "skin", "respiration", "thermal", "expression")
+            for name in ("gait", "thermal", "expression")
         }
 
         red_flags = 0
         yellow_flags = 0
         rationale_parts: list[str] = []
 
-        # Skin: ESKI demo vocab (pallor:bool, pallor_score, severity) VEYA
-        # YENI canlı agent vocab (skin_tone in {"solgun","belirsiz","normal"}).
-        skin = by_agent.get("skin")
-        if skin and skin["confidence"] >= 0.5:
-            signals = skin.get("signals", {})
-            pallor_score = float(signals.get("pallor_score", 0))
-            severity = signals.get("severity")
-            skin_tone = signals.get("skin_tone")
-            if (
-                signals.get("pallor") is True
-                or severity == "high"
-                or pallor_score >= 0.6
-                or skin_tone == "solgun"
-            ):
-                red_flags += 1
-                rationale_parts.append(
-                    f"Ten rengi ajanı %{int(skin['confidence']*100)} "
-                    "güvenle solgunluk tespit etti"
-                )
-            elif severity == "mild" or pallor_score >= 0.3:
-                yellow_flags += 1
-                rationale_parts.append("Ten rengi ajanı hafif solgunluk tespit etti")
-
-        # Respiration: ESKI (rate_bpm/pattern) VEYA YENI (breaths_per_minute/
-        # breathing_pattern). breath_per_minute eski mertmrz adı, korunuyor.
-        resp = by_agent.get("respiration")
-        if resp and resp["confidence"] >= 0.5:
-            signals = resp.get("signals", {})
-            rate = float(
-                signals.get("rate_bpm", 0)
-                or signals.get("breath_per_minute", 0)
-                or signals.get("breaths_per_minute", 0)
-            )
-            pattern = signals.get("pattern") or signals.get("breathing_pattern", "")
-            severity = signals.get("severity")
-            if rate >= 24 or severity == "high" or pattern in ("hızlı", "apne_riski"):
-                red_flags += 1
-                rationale_parts.append(
-                    f"solunum ajanı %{int(resp['confidence']*100)} "
-                    "güvenle anormal solunum bildirdi"
-                )
-            elif rate >= 20 or severity == "mild" or pattern in ("yavaş", "düzensiz"):
-                yellow_flags += 1
-                rationale_parts.append("solunum ajanı hafif anormallik bildirdi")
-
         # Gait: ESKI (sway:bool/sway_score/symmetry) VEYA YENI (sway_detected/
-        # symmetry_status).
+        # symmetry_status). 3 ajanlı setup'ta severity:"high" tek başına kırmızı
+        # eşiğe yaklaşır (belirgin sallantılı + asimetrik yürüyüş düşme/şok
+        # riskinin güçlü göstergesi).
         gait = by_agent.get("gait")
         if gait and gait["confidence"] >= 0.5:
             signals = gait.get("signals", {})
@@ -134,13 +91,19 @@ class MockLLMClient(LLMClient):
             severity = signals.get("severity")
             sway_new = signals.get("sway_detected") is True
             asym_new = signals.get("symmetry_status") == "anormal"
-            if (
+            has_sway = (
                 signals.get("sway") is True
-                or severity == "high"
                 or sway_score >= 0.6
                 or sway_new
                 or asym_new
-            ):
+            )
+            if severity == "high":
+                red_flags += 1
+                rationale_parts.append(
+                    f"yürüyüş ajanı %{int(gait['confidence']*100)} "
+                    "güvenle belirgin sallantılı/asimetrik yürüyüş tespit etti"
+                )
+            elif has_sway or severity == "mild":
                 yellow_flags += 1
                 rationale_parts.append(
                     f"yürüyüş ajanı %{int(gait['confidence']*100)} "
