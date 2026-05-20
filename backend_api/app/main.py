@@ -31,6 +31,7 @@ from orchestration.schemas import (
     AgentBundle,
     DecisionRecord,
     NurseFeedback,
+    TriageCategory,
     TriageDecision,
     TriageEvent,
 )
@@ -39,6 +40,19 @@ from orchestration.supervisor import Supervisor
 
 logger = logging.getLogger("vita_porta")
 logging.basicConfig(level=logging.INFO)
+
+# En az bir ajanın güveni bu eşiğin üstünde değilse bundle "anlamsız"
+# sayılır: supervisor çağrılmaz, doğrudan INSUFFICIENT döner. Gateway
+# zaten bu seviyede filtre uyguluyor ([gateway_agents/runner.py]); bu
+# kontrol gateway by-pass edildiğinde (curl, başka client) ikinci kapı.
+_MEANINGFUL_CONFIDENCE_THRESHOLD = 0.3
+
+
+def _has_meaningful_observations(bundle: AgentBundle) -> bool:
+    return any(
+        obs.confidence >= _MEANINGFUL_CONFIDENCE_THRESHOLD
+        for obs in bundle.observations()
+    )
 
 
 @asynccontextmanager
@@ -86,6 +100,18 @@ async def healthz() -> dict[str, str]:
 async def run_triage(bundle: AgentBundle) -> dict:
     supervisor: Supervisor = app.state.supervisor
     bus: EventBus = app.state.event_bus
+
+    # Anlamsız bundle (kapı boş / tüm ajanlar düşük güvenli) → LLM çağırma,
+    # SSE bus'ı kirletme, decisions_store'a "boş hasta" yazma. Doğrudan
+    # INSUFFICIENT dön. Gateway zaten gate uyguluyor; bu burada da olunca
+    # curl / demo / 3. taraf client'lardan da korunmuş olur.
+    if not _has_meaningful_observations(bundle):
+        return TriageDecision.from_category(
+            patient_id=bundle.patient_id,
+            category=TriageCategory.INSUFFICIENT,
+            rationale_tr="Görüş alanında geçerli gözlem yok.",
+            confidence=0.0,
+        ).model_dump(mode="json")
 
     for obs in bundle.observations():
         await bus.publish(

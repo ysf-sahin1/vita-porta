@@ -12,9 +12,39 @@ from typing import Any
 import numpy as np
 import pytest
 
+from gateway_agents.agents.base import AnalysisWindow
 from gateway_agents.io.base import FrameSource
 from gateway_agents.runner import Runner
-from orchestration.schemas import AgentBundle
+from orchestration.schemas import AgentBundle, AgentObservation
+
+
+class _StubAgent:
+    """Deterministic stub — Runner pipeline'ı test ederken gerçek ajan
+    çıkarımına bağlanmadan istediğimiz güveni dönerek bundle akışını izole
+    eder. Random frame'lerde gerçek mediapipe pose/face tutarsız güvenle
+    döner; bu da meaningful-bundle gate testlerini kırılgan yapar."""
+
+    def __init__(self, name: str, confidence: float = 0.7) -> None:
+        self.name = name
+        self._conf = confidence
+
+    def analyze(self, window: AnalysisWindow) -> AgentObservation:
+        return AgentObservation(
+            agent=self.name,  # type: ignore[arg-type]
+            confidence=self._conf,
+            summary_tr=f"{self.name} stub gözlemi",
+            signals={},
+        )
+
+    def close(self) -> None:
+        return None
+
+
+def _patch_agents(runner: Runner, confidence: float = 0.7) -> None:
+    """Replace the runner's real agents with deterministic stubs."""
+    runner._gait = _StubAgent("gait", confidence)         # type: ignore[assignment]
+    runner._thermal = _StubAgent("thermal", confidence)   # type: ignore[assignment]
+    runner._expression = _StubAgent("expression", confidence)  # type: ignore[assignment]
 
 
 class FakeFrameSource(FrameSource):
@@ -92,6 +122,7 @@ def test_run_once_returns_bundle_with_three_observations(
 ) -> None:
     source = FakeFrameSource(count=60, fps=15.0)
     with Runner(source=source, window_duration_s=3.0) as runner:
+        _patch_agents(runner)
         bundle = runner.run_once()
 
     assert isinstance(bundle, AgentBundle)
@@ -115,6 +146,7 @@ def test_run_once_returns_none_when_source_empty(
 ) -> None:
     source = FakeFrameSource(count=0, fps=15.0)
     with Runner(source=source) as runner:
+        _patch_agents(runner)
         result = runner.run_once()
     assert result is None
     assert capture_post == []
@@ -127,6 +159,7 @@ def test_partial_window_still_produces_bundle(
     # take what is available and still produce a bundle (≥1 frame).
     source = FakeFrameSource(count=10, fps=15.0)
     with Runner(source=source, window_duration_s=3.0) as runner:
+        _patch_agents(runner)
         bundle = runner.run_once()
 
     assert isinstance(bundle, AgentBundle)
@@ -145,6 +178,7 @@ def test_backend_unreachable_does_not_crash(monkeypatch: pytest.MonkeyPatch) -> 
     source = FakeFrameSource(count=45, fps=15.0)
     with Runner(source=source) as runner:
         # Must not raise even though POST fails — runner logs a warning.
+        _patch_agents(runner)
         bundle = runner.run_once()
 
     assert isinstance(bundle, AgentBundle)
@@ -169,3 +203,144 @@ def test_context_manager_closes(monkeypatch: pytest.MonkeyPatch) -> None:
     with Runner(source=source) as runner:
         assert isinstance(runner, Runner)
     assert source.closed is True
+
+
+def test_esp_host_triggers_verdict_callback(
+    monkeypatch: pytest.MonkeyPatch,
+    capture_post: list[dict[str, Any]],
+) -> None:
+    """esp_host verildiğinde supervisor verdict'i ESP'ye GET ile bildirilir."""
+
+    import httpx
+
+    captured_gets: list[dict[str, Any]] = []
+
+    def fake_get(
+        self: httpx.Client,
+        url: str,
+        *,
+        params: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> _CapturingResponse:
+        captured_gets.append({"url": url, "params": params})
+        return _CapturingResponse({"ok": True})
+
+    monkeypatch.setattr(httpx.Client, "get", fake_get)
+
+    source = FakeFrameSource(count=45, fps=15.0)
+    with Runner(source=source, esp_host="192.168.1.42") as runner:
+        _patch_agents(runner)
+        runner.run_once()
+
+    # Backend POST hâlâ yapılmalı
+    assert len(capture_post) == 1
+    # ESP /verdict GET çağrısı yapılmış olmalı
+    verdict_calls = [g for g in captured_gets if "/verdict" in g["url"]]
+    assert len(verdict_calls) == 1
+    call = verdict_calls[0]
+    assert call["url"] == "http://192.168.1.42:80/verdict"
+    assert call["params"] == {"level": "green", "src": "supervisor"}
+
+
+def test_esp_verdict_failure_does_not_crash(
+    monkeypatch: pytest.MonkeyPatch,
+    capture_post: list[dict[str, Any]],
+) -> None:
+    """ESP /verdict çağrısı çökse bile runner devam etmeli (best-effort)."""
+
+    import httpx
+
+    def raising_get(*args: Any, **kwargs: Any) -> _CapturingResponse:
+        raise httpx.ConnectError("esp offline")
+
+    monkeypatch.setattr(httpx.Client, "get", raising_get)
+
+    source = FakeFrameSource(count=45, fps=15.0)
+    with Runner(source=source, esp_host="192.168.1.42") as runner:
+        _patch_agents(runner)
+        bundle = runner.run_once()
+
+    assert bundle is not None
+    assert len(capture_post) == 1  # backend POST yine yapıldı
+
+
+def test_no_esp_host_skips_verdict_callback(
+    monkeypatch: pytest.MonkeyPatch,
+    capture_post: list[dict[str, Any]],
+) -> None:
+    """esp_host=None iken /verdict çağrısı **hiç** yapılmamalı."""
+
+    import httpx
+
+    captured_gets: list[dict[str, Any]] = []
+
+    def fake_get(self: httpx.Client, url: str, **kwargs: Any) -> _CapturingResponse:
+        captured_gets.append({"url": url})
+        return _CapturingResponse({"ok": True})
+
+    monkeypatch.setattr(httpx.Client, "get", fake_get)
+
+    source = FakeFrameSource(count=45, fps=15.0)
+    with Runner(source=source) as runner:
+        _patch_agents(runner)
+        runner.run_once()
+
+    assert captured_gets == []
+    assert len(capture_post) == 1
+
+
+# ----------------------------------------------- meaningful-bundle gate testleri
+
+
+def test_low_confidence_bundle_is_not_posted(
+    capture_post: list[dict[str, Any]],
+) -> None:
+    """Tüm ajan güveni 0.3 eşiğinin altındaysa backend'e POST atılmamalı."""
+
+    source = FakeFrameSource(count=45, fps=15.0)
+    with Runner(source=source) as runner:
+        _patch_agents(runner, confidence=0.1)  # eşik altı
+        bundle = runner.run_once()
+
+    assert bundle is not None  # bundle yine üretildi (debug erişimi için)
+    assert capture_post == []  # ama backend'e gitmedi
+
+
+def test_meaningful_bundle_is_posted(
+    capture_post: list[dict[str, Any]],
+) -> None:
+    """En az bir ajan eşiği geçtiğinde bundle gönderilmeli."""
+
+    source = FakeFrameSource(count=45, fps=15.0)
+    with Runner(source=source) as runner:
+        _patch_agents(runner, confidence=0.4)
+        bundle = runner.run_once()
+
+    assert bundle is not None
+    assert len(capture_post) == 1
+
+
+def test_low_confidence_bundle_skips_verdict_callback(
+    monkeypatch: pytest.MonkeyPatch,
+    capture_post: list[dict[str, Any]],
+) -> None:
+    """Bundle atlanırsa ESP /verdict de tetiklenmemeli (POST yapılmadığı için)."""
+
+    import httpx
+
+    captured_gets: list[dict[str, Any]] = []
+
+    def fake_get(self: httpx.Client, url: str, **kwargs: Any) -> _CapturingResponse:
+        captured_gets.append({"url": url})
+        return _CapturingResponse({"ok": True})
+
+    monkeypatch.setattr(httpx.Client, "get", fake_get)
+
+    source = FakeFrameSource(count=45, fps=15.0)
+    with Runner(source=source, esp_host="192.168.1.42") as runner:
+        _patch_agents(runner, confidence=0.1)
+        runner.run_once()
+
+    assert capture_post == []
+    verdict_calls = [g for g in captured_gets if "/verdict" in g["url"]]
+    assert verdict_calls == []

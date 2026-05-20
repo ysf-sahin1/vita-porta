@@ -39,8 +39,24 @@ _TRIAGE_ENDPOINT = "/api/triage/run"
 _HTTP_TIMEOUT_S = 10.0
 
 
+_VERDICT_TIMEOUT_S = 1.5
+_ESP_PORT = 80
+_VALID_VERDICT_LEVELS = {"red", "yellow", "green", "insufficient"}
+
+# En az bir ajan bu eşiği geçmiyorsa bundle "anlamsız" sayılır ve backend'e
+# gönderilmez. Kapıda hasta yokken sürekli LLM çağırmamak için kalkan.
+_MEANINGFUL_CONFIDENCE_THRESHOLD = 0.3
+
+
 class Runner:
-    """Pulls frames, runs three agents in parallel, posts the bundle to the backend."""
+    """Pulls frames, runs three agents in parallel, posts the bundle to the backend.
+
+    If ``esp_host`` is provided, the ThermalAgent reads live AMG8833 data from
+    ``http://{esp_host}/thermal`` and the supervisor's verdict is pushed back
+    to ``http://{esp_host}/verdict`` to drive the LED. With ``esp_host=None``
+    the runner falls back to RGB proxy thermal and skips the verdict callback —
+    keeping webcam-only / video / unit-test paths unchanged.
+    """
 
     def __init__(
         self,
@@ -48,16 +64,18 @@ class Runner:
         backend_url: str = "http://127.0.0.1:8000",
         window_duration_s: float = 3.0,
         max_workers: int = 3,
+        esp_host: str | None = None,
     ) -> None:
         self.source = source
         self.backend_url = backend_url.rstrip("/")
         self.window_duration_s = window_duration_s
+        self.esp_host = esp_host.strip() if esp_host else None
 
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._http = httpx.Client(timeout=_HTTP_TIMEOUT_S)
 
         self._gait = GaitAgent()
-        self._thermal = ThermalAgent()
+        self._thermal = ThermalAgent(esp_host=self.esp_host)
         self._expression = ExpressionAgent()
 
         self._frame_iter = source.frames()
@@ -161,7 +179,26 @@ class Runner:
         expression_obs = expression_fut.result()
         return _build_bundle(gait_obs, thermal_obs, expression_obs)
 
+    def _is_bundle_meaningful(self, bundle: AgentBundle) -> bool:
+        """En az bir ajanın güveni eşiğin üstündeyse bundle anlamlıdır.
+
+        Kapıda kimse olmadığında 3 ajan da düşük/sıfır güvenle gelir; bu
+        bundle'ı backend'e iletmek anlamsız LLM çağrısı + history kirliliği
+        üretir.
+        """
+        return any(
+            obs.confidence >= _MEANINGFUL_CONFIDENCE_THRESHOLD
+            for obs in bundle.observations()
+        )
+
     def _post_bundle(self, bundle: AgentBundle) -> None:
+        if not self._is_bundle_meaningful(bundle):
+            logger.debug(
+                "Bundle anlamsız (tüm ajan güveni < %.2f) — backend'e gönderilmedi.",
+                _MEANINGFUL_CONFIDENCE_THRESHOLD,
+            )
+            return
+
         url = f"{self.backend_url}{_TRIAGE_ENDPOINT}"
         try:
             resp = self._http.post(url, json=bundle.model_dump(mode="json"))
@@ -176,12 +213,39 @@ class Runner:
             logger.warning("Backend yanıtı JSON değil: %r", resp.text[:200])
             return
 
+        category = payload.get("category")
         logger.info(
             "Karar: %s — %s (güven=%.2f)",
-            payload.get("category"),
+            category,
             payload.get("rationale_tr"),
             float(payload.get("confidence", 0.0) or 0.0),
         )
+
+        # Karar zincirini kapat: supervisor verdict'ini ESP'ye ilet → LED yanar.
+        # esp_host yoksa (webcam/video/test) atlanır.
+        if self.esp_host and isinstance(category, str):
+            self._push_verdict(category)
+
+    def _push_verdict(self, category: str) -> None:
+        """ESP /verdict endpoint'ini çağır — best-effort, hata yutulur."""
+
+        level = category.lower().strip()
+        if level not in _VALID_VERDICT_LEVELS:
+            logger.debug("Geçersiz verdict kategorisi atlandı: %r", category)
+            return
+
+        url = f"http://{self.esp_host}:{_ESP_PORT}/verdict"
+        try:
+            resp = self._http.get(
+                url,
+                params={"level": level, "src": "supervisor"},
+                timeout=_VERDICT_TIMEOUT_S,
+            )
+            resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            logger.warning("ESP /verdict çağrısı başarısız (%s): %s", url, exc)
+            return
+        logger.info("ESP LED güncellendi: level=%s", level)
 
     def _log_bundle(self, bundle: AgentBundle) -> None:
         for obs in bundle.observations():
@@ -289,6 +353,7 @@ def main(argv: list[str] | None = None) -> int:
         source=source,
         backend_url=args.backend,
         window_duration_s=args.window,
+        esp_host=args.esp,
     ) as runner:
         runner.run_forever()
     return 0
