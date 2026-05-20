@@ -19,18 +19,6 @@ from orchestration.supervisor import Supervisor
 def critical_case() -> AgentBundle:
     return AgentBundle(
         patient_id="demo-red",
-        skin=AgentObservation(
-            agent="skin",
-            confidence=0.88,
-            summary_tr="Yüzde belirgin solgunluk ve dudak renginde kayıp gözlemlendi",
-            signals={"pallor": True, "severity": "high", "hsv_v": 0.42},
-        ),
-        respiration=AgentObservation(
-            agent="respiration",
-            confidence=0.92,
-            summary_tr="Solunum hızı 28/dk, sığ ve hızlı solunum örüntüsü",
-            signals={"rate_bpm": 28, "severity": "high", "regularity": 0.41},
-        ),
         gait=AgentObservation(
             agent="gait",
             confidence=0.76,
@@ -70,12 +58,6 @@ def critical_case() -> AgentBundle:
 def ambiguous_case() -> AgentBundle:
     return AgentBundle(
         patient_id="demo-yellow",
-        skin=AgentObservation(
-            agent="skin",
-            confidence=0.63,
-            summary_tr="Hafif solgunluk eğilimi, kritik eşik altında",
-            signals={"pallor": False, "severity": "mild"},
-        ),
         gait=AgentObservation(
             agent="gait",
             confidence=0.71,
@@ -115,18 +97,6 @@ def ambiguous_case() -> AgentBundle:
 def stable_case() -> AgentBundle:
     return AgentBundle(
         patient_id="demo-green",
-        skin=AgentObservation(
-            agent="skin",
-            confidence=0.84,
-            summary_tr="Normal ten rengi, ek bulgu yok",
-            signals={"pallor": False, "severity": "none"},
-        ),
-        respiration=AgentObservation(
-            agent="respiration",
-            confidence=0.81,
-            summary_tr="Solunum hızı 15/dk, düzenli",
-            signals={"rate_bpm": 15, "severity": "none", "regularity": 0.94},
-        ),
         gait=AgentObservation(
             agent="gait",
             confidence=0.80,

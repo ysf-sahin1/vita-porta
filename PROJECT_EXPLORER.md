@@ -12,7 +12,7 @@
 | **E2E çalışır mı?** | Evet (gerçek webcam + mock veri) | ✅ Canlı |
 | **Backend + Gateway test coverage** | 27/27 pass | ✅ Yeşil |
 | **Frontend derlemesi** | `tsc --noEmit` clean | ✅ Temiz |
-| **Görsel ajan sayısı** | **5/5** (gait/skin/respiration/thermal/expression) | ✅ Tam |
+| **Görsel ajan sayısı** | **3/3** (gait/thermal/expression) | ✅ Tam |
 | **Hazır demo senaryoları** | 3 (kırmızı/sarı/yeşil) | ✅ Çalışır |
 | **Hemşire giriş ekranı** | localStorage-tabanlı, KVKK-uyumlu | ✅ Devrede |
 
@@ -76,21 +76,19 @@ Vita Porta/
 │   │   └── agentReasons.ts         # info/warn/error reason pill'leri (5 ajan)
 │   └── tailwind.config.ts          # Triage renkleri + 6 animasyon (pulseRing, statusGlow, lineFlow, silhouettePulse, silhouetteSway, chestBreathe)
 │
-├── gateway_agents/                  # 5 görsel ajan + IO + runner
+├── gateway_agents/                  # 3 görsel ajan + IO + runner
 │   ├── agents/
 │   │   ├── base.py                 # Agent ABC + AnalysisWindow
 │   │   ├── gait.py                 # MediaPipe Pose (sway, asymmetry, posture)
-│   │   ├── skin.py                 # OpenCV Haar Cascade + HSV (skin_tone)
-│   │   ├── respiration.py          # Frame-diff + peak detection (breaths_per_minute, pattern)
 │   │   ├── thermal.py              # MediaPipe Face Detection + LAB warmth (temp_estimate_c, fever_flag, hypothermia_flag)
 │   │   └── expression.py           # **MediaPipe Face Mesh** (EAR, PSPI proxy, face_asymmetry, consciousness_hint)
 │   ├── io/
 │   │   ├── webcam.py               # cv2.VideoCapture (macOS AVFoundation default, Windows CAP_DSHOW fallback)
 │   │   ├── video_file.py           # VideoFileSource (loop desteği)
 │   │   └── mqtt.py                 # MqttSource (paho-mqtt, lazy import)
-│   ├── runner.py                   # 5 ajan paralel (ThreadPoolExecutor max_workers=5)
+│   ├── runner.py                   # 3 ajan paralel (ThreadPoolExecutor max_workers=3)
 │   └── tests/
-│       ├── test_agents.py          # 4 sınıf × 3 test + 4 schema conformance = 16 ✅
+│       ├── test_agents.py          # 2 sınıf × 3 test + 2 schema conformance ✅
 │       └── test_runner.py          # 6 ✅
 │
 ├── edge_firmware/                   # ESP32-CAM (BAŞLANMADI — Faz 6)
@@ -115,7 +113,7 @@ Vita Porta/
 | Faz | Adı | Durum | Notlar |
 | --- | --- | --- | --- |
 | 0 | NotebookLM bağlantısı | ✅ | Notebook ID `d9854800-…` |
-| 1 | Monorepo + Pydantic şemaları | ✅ | 5 ajanlı `AgentBundle` |
+| 1 | Monorepo + Pydantic şemaları | ✅ | 3 ajanlı `AgentBundle` |
 | 2 | Supervisor (LangGraph) + RAG | ✅ | 5/5 test, mock + provider-agnostic LLM |
 | 3 | FastAPI backend + SSE | ✅ | `/healthz`, `/api/triage/run`, `/api/triage/stream`, `/api/triage/demo` |
 | 4 | Next.js dashboard (ilk versiyon) | ✅ | Tailwind + lucide-react |

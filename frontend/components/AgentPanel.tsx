@@ -7,7 +7,6 @@ import type { AgentObservation, TriageCategory } from "@/lib/types";
 import {
   Activity,
   AlertTriangle,
-  Droplets,
   Footprints,
   Info,
   Smile,
@@ -17,15 +16,13 @@ import { AnatomicalRadial } from "./AnatomicalRadial";
 import { PostureSilhouette } from "./PostureSilhouette";
 import { Tooltip } from "./Tooltip";
 
-export type Agent = "gait" | "skin" | "respiration" | "thermal" | "expression";
+export type Agent = "gait" | "thermal" | "expression";
 
 export const AGENT_META: Record<
   Agent,
   { label: string; Icon: typeof Activity; color: string; bg: string }
 > = {
   gait: { label: "Yürüyüş Ajanı", Icon: Footprints, color: "text-indigo-600", bg: "bg-indigo-50" },
-  skin: { label: "Ten Rengi Ajanı", Icon: Droplets, color: "text-rose-600", bg: "bg-rose-50" },
-  respiration: { label: "Solunum Ajanı", Icon: Activity, color: "text-sky-600", bg: "bg-sky-50" },
   thermal: { label: "Termal Ajan", Icon: Thermometer, color: "text-orange-600", bg: "bg-orange-50" },
   expression: {
     label: "Yüz İfadesi Ajanı",
@@ -49,7 +46,7 @@ export function AgentPanel({
         <AnatomicalRadial observations={observations} category={category} />
       </div>
       {/* Mobile / tablet fallback — düz grid */}
-      <div className="xl:hidden grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="xl:hidden grid grid-cols-1 md:grid-cols-3 gap-4">
         {(Object.keys(AGENT_META) as Agent[]).map((agent) => (
           <AgentCard key={agent} agent={agent} obs={observations[agent]} />
         ))}

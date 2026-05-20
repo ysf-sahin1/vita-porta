@@ -1,6 +1,7 @@
 "use client";
 
 import { LoginScreen } from "@/components/LoginScreen";
+import { endSessionApi } from "@/lib/api";
 import { clearSession, getSession, type NurseSession } from "@/lib/session";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 
@@ -27,6 +28,11 @@ export function SessionGate({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
+    const current = getSession();
+    if (current?.sessionId) {
+      // Best-effort — endSessionApi fail-silent.
+      void endSessionApi(current.sessionId);
+    }
     clearSession();
     setLocalSession(null);
   }, []);

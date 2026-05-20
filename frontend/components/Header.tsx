@@ -5,6 +5,7 @@ import { displayName } from "@/lib/session";
 import { Building2, LogOut, ShieldCheck, User } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNurseSession } from "./SessionGate";
+import { ShiftHistoryPopover } from "./ShiftHistoryPopover";
 import type { ConnectionStatus } from "./useTriageStream";
 
 type PillState = "live" | "warn" | "off";
@@ -31,7 +32,7 @@ export function Header({ apiStatus, lastObservationAt, lastDecisionLatencyMs }: 
   const llmLabel = describeLlm(lastDecisionLatencyMs);
 
   return (
-    <header className="rounded-3xl bg-white/70 backdrop-blur-xl border border-white/60 shadow-glass px-6 py-5 md:px-8 md:py-6 flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+    <header className="relative z-20 rounded-3xl bg-white/70 backdrop-blur-xl border border-white/60 shadow-glass px-6 py-5 md:px-8 md:py-6 flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
       <div className="flex items-center gap-4">
         <div className="rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 p-3 text-white shadow-glass">
           <ShieldCheck className="w-7 h-7" strokeWidth={2.2} />
@@ -59,6 +60,7 @@ export function Header({ apiStatus, lastObservationAt, lastDecisionLatencyMs }: 
         <StatusPill state={apiState} label={apiLabel} />
         <StatusPill state={llmState} label={llmLabel} />
         <LiveClock />
+        <ShiftHistoryPopover currentSessionId={session.sessionId} />
         <button
           type="button"
           onClick={logout}

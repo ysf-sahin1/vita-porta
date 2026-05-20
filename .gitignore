@@ -28,8 +28,10 @@ logs/
 .chroma/
 orchestration/rag/.chroma/
 
-# Nurse feedback JSON store (local persistance, KVKK uyumu için repo'da değil)
+# Runtime persistance — local kayıt, repo'da tutulmaz (KVKK + demo trafiği)
 .feedback/
+.decisions/
+.sessions/
 
 # OS
 .DS_Store

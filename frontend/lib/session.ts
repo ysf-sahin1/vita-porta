@@ -7,6 +7,8 @@ export interface NurseSession {
   lastName: string;
   hospital: string;
   savedAt: string;
+  /** Backend `/api/sessions/start` 'ten dönen oturum id'si — çıkışta kapatmak için. */
+  sessionId?: string;
 }
 
 export function getSession(): NurseSession | null {
@@ -21,6 +23,7 @@ export function getSession(): NurseSession | null {
       lastName: String(parsed.lastName),
       hospital: String(parsed.hospital),
       savedAt: String(parsed.savedAt ?? new Date().toISOString()),
+      sessionId: parsed.sessionId ? String(parsed.sessionId) : undefined,
     };
   } catch {
     return null;

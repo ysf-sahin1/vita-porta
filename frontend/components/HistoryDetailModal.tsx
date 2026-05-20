@@ -8,7 +8,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock3,
-  Droplets,
   Footprints,
   HelpCircle,
   History,
@@ -25,7 +24,7 @@ import {
 } from "./NurseVerdict";
 import type { HistoryEntry, NurseMeta } from "./useTriageStream";
 
-type AgentKey = "gait" | "skin" | "respiration" | "thermal" | "expression";
+type AgentKey = "gait" | "thermal" | "expression";
 
 const CATEGORY_STYLE: Record<
   TriageCategory,
@@ -57,8 +56,6 @@ const AGENT_META: Record<
   { label: string; Icon: typeof Activity; color: string; bg: string }
 > = {
   gait: { label: "Yürüyüş", Icon: Footprints, color: "text-indigo-600", bg: "bg-indigo-50" },
-  skin: { label: "Ten Rengi", Icon: Droplets, color: "text-rose-600", bg: "bg-rose-50" },
-  respiration: { label: "Solunum", Icon: Activity, color: "text-sky-600", bg: "bg-sky-50" },
   thermal: { label: "Termal", Icon: Thermometer, color: "text-orange-600", bg: "bg-orange-50" },
   expression: { label: "Yüz İfadesi", Icon: Smile, color: "text-violet-600", bg: "bg-violet-50" },
 };

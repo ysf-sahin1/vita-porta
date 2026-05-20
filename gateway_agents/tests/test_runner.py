@@ -87,7 +87,7 @@ def capture_post(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     return captured
 
 
-def test_run_once_returns_bundle_with_five_observations(
+def test_run_once_returns_bundle_with_three_observations(
     capture_post: list[dict[str, Any]],
 ) -> None:
     source = FakeFrameSource(count=60, fps=15.0)
@@ -96,18 +96,16 @@ def test_run_once_returns_bundle_with_five_observations(
 
     assert isinstance(bundle, AgentBundle)
     assert bundle.gait is not None
-    assert bundle.skin is not None
-    assert bundle.respiration is not None
     assert bundle.thermal is not None
     assert bundle.expression is not None
-    assert len(bundle.observations()) == 5
+    assert len(bundle.observations()) == 3
 
     assert len(capture_post) == 1
     call = capture_post[0]
     assert call["url"].endswith("/api/triage/run")
     payload = call["json"]
     assert isinstance(payload, dict)
-    for name in ("gait", "skin", "respiration", "thermal", "expression"):
+    for name in ("gait", "thermal", "expression"):
         assert name in payload
         assert payload[name]["agent"] == name
 
@@ -132,7 +130,7 @@ def test_partial_window_still_produces_bundle(
         bundle = runner.run_once()
 
     assert isinstance(bundle, AgentBundle)
-    assert len(bundle.observations()) == 5
+    assert len(bundle.observations()) == 3
     assert len(capture_post) == 1
 
 

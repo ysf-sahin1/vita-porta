@@ -2,7 +2,7 @@
 
 Bu dosya geliştirme oturumlarının kaldığı yerden devam edebilmesi için tutulur. Her faz: durum, neyin tamamlandığı, neyin kaldığı, ilgili dosyalar ve doğrulama yöntemi.
 
-**Genel durum:** 7.5/8 faz tamamlandı + **Faz 4.5 (Frontend yenileme)** + **Faz 4.6 (login + radyal)** + **Faz 5 tamamen kapandı** (5 ajan) + **Faz 5.7 (verdict persistance + mesai history + RAG deneyim katmanı)** + **Faz 5.8 (tüm kararların kalıcı kaydı + sıfırlama akışı)** tamamlandı (2026-05-16). Sistem **gerçek webcam'den canlı çalışıyor**: **5 görsel ajan** (yürüyüş, ten rengi, solunum, termal, yüz ifadesi) paralel işliyor, supervisor RAG + geçmiş hemşire kararları ile karar üretiyor, dashboard SSE ile yayınlıyor. **Tüm triaj kararları kalıcı kaydediliyor** (`.decisions/decisions.jsonl`); hemşire ✓/✗/✎ verdict'leri ayrı bir store'da (`.feedback/feedbacks.jsonl`). Sayfa yenilense, hemşire değişse, oturum kapansa bile **hem genel hasta listesi hem de verdict'ler korunuyor**; istenirse "Sıfırla" butonu ile her ikisi de kalıcı olarak silinebiliyor. Yeni vaka geldiğinde benzer sinyalli geçmiş hemşire kararı bağlam olarak supervisor'a giriyor ve UI'da görünüyor. Kalan: edge firmware + Docker compose (Faz 6) ve pitch polish (Faz 8).
+**Genel durum:** 7.5/8 faz tamamlandı + **Faz 4.5 (Frontend yenileme)** + **Faz 4.6 (login + radyal)** + **Faz 5 tamamen kapandı** + **Faz 5.7 (verdict persistance + mesai history + RAG deneyim katmanı)** + **Faz 5.8 (tüm kararların kalıcı kaydı + sıfırlama akışı)** + **Faz 5.9 (3 ajan sadeleştirmesi + hemşire mesai paneli)** tamamlandı (2026-05-20). Sistem **gerçek webcam'den canlı çalışıyor**: **3 görsel ajan** (yürüyüş, termal, yüz ifadesi) paralel işliyor, supervisor RAG + geçmiş hemşire kararları ile karar üretiyor, dashboard SSE ile yayınlıyor. **Tüm triaj kararları kalıcı kaydediliyor** (`.decisions/decisions.jsonl`); hemşire ✓/✗/✎ verdict'leri ayrı bir store'da (`.feedback/feedbacks.jsonl`); **hemşire login/logout zamanları üçüncü bir store'da** (`.sessions/sessions.jsonl`) ve dashboard header'ında popover ile görünüyor. Sayfa yenilense, hemşire değişse, oturum kapansa bile **hem genel hasta listesi hem verdict'ler hem mesai kayıtları korunuyor**; istenirse "Sıfırla" butonu ile decision/feedback ikilisi kalıcı olarak silinebiliyor. Yeni vaka geldiğinde benzer sinyalli geçmiş hemşire kararı bağlam olarak supervisor'a giriyor ve UI'da görünüyor. Kalan: edge firmware tamamlama (Faz 6 — ESP32-CAM + ChromaDB entegrasyonu merttro/Yusuf turunda yapıldı) ve pitch polish (Faz 8).
 
 **NotebookLM bağlantısı:** Notebook ID `d9854800-b703-4b71-919f-6121bb3e05d8`. Proje bağlamı her oturumda NotebookLM'den çekilir.
 
@@ -620,12 +620,97 @@ orchestration/demo.py            # 3 senaryoya thermal observation
 
 ---
 
+## Faz 5.9 — 3 ajan sadeleştirmesi + hemşire mesai paneli · ✅ Tamamlandı (2026-05-20)
+
+**Bağlam:** Pipeline 5 ajandan (gait/skin/respiration/thermal/expression) **3 ajana** indirildi: yürüyüş + termal + yüz ifadesi. Ten Rengi (skin) ve Solunum (respiration) ajanları tamamen kaldırıldı. Skin agent OpenCV Haar Cascade + HSV ile cilt tonu tahmini yapıyordu ama yüz tespiti kapı mesafesinde sıkça düşüyor, sinyal pratikte gürültülüydü. Respiration agent göğüs ROI frame-diff peak detection ile breath_per_minute hesaplıyordu ama 3 sn'lik pencerede tek bir net solunum döngüsü görmek için çok kısa süre — sinyal tutarsızdı. Kalan 3 ajan (gait sallantı/asimetri + thermal ateş/hipotermi + expression ağrı/asimetri/bilinç) çoklu-modalite ESI kararı için yeterli kapsam veriyor; supervisor heuristik yeniden kalibre edildi. Aynı turda hemşire mesai giriş/çıkış kayıtları için kalıcı panel eklendi — dashboard'da hangi hemşirenin ne zaman aktif olduğu görünüyor.
+
+### 1) Frontend 5→3 ajan (ilk pas)
+İlk turda kullanıcı sadece frontend'de 3 ajan istedi:
+- `frontend/lib/types.ts` — `AgentObservation.agent` union 3 ajana indi.
+- `frontend/lib/agentReasons.ts` — `skin` ve `respiration` reason blokları silindi (gait/thermal/expression blokları korundu).
+- `frontend/components/AgentPanel.tsx` — `Agent` type + `AGENT_META` 3 ajana indi; `Droplets` ikonu kullanılmadığı için import'tan çıkarıldı; mobile fallback grid `md:grid-cols-3`.
+- `frontend/components/HistoryDetailModal.tsx` — `AgentKey` + `AGENT_META` 3'e, `Droplets` import kaldırıldı.
+- `frontend/components/useTriageStream.ts` — `AgentKey` type 3'e.
+- `frontend/components/AnatomicalRadial.tsx` — `CONNECTIONS` ve `CARD_POSITIONS` 3 ajana indi; ASCII şeması güncellendi; silüet vektöründen `respiration` breathing animasyonu ve referansları (`const resp`, `breathing`, `className={breathing ? "animate-chestBreathe" : ""}`) tamamen kaldırıldı. Yerleşim: expression sol-üst (`left:0% top:3%`), thermal sağ-üst (`left:72% top:3%`), gait alt-orta (`left:36% top:82%`) — silüet ortada, iki üst + bir alt simetrik dağılım.
+- `frontend/components/TriageCard.tsx` — ajan ağırlık grid'i 5 sütundan 3 sütuna (`grid-cols-1 md:grid-cols-3`), hardcoded `["gait","skin","respiration","thermal","expression"]` → `["gait","thermal","expression"]`.
+- Doğrulama: `npx tsc --noEmit` clean. Frontend lokal'de kalan skin/respiration referansları sıfır.
+
+### 2) Backend 5→3 ajan (ikinci pas)
+Kullanıcı "tüm projede 3 ajan olsun" deyince backend'e taşındı:
+- `orchestration/schemas.py` — `AgentObservation.agent` Literal `("gait","thermal","expression")`; `AgentBundle` alanları (`skin: AgentObservation | None`, `respiration: AgentObservation | None`) silindi; `observations()` 3'lü tuple.
+- `gateway_agents/agents/skin.py` ve `gateway_agents/agents/respiration.py` **dosyaları silindi**. `__pycache__` temizlendi.
+- `gateway_agents/agents/__init__.py` — `SkinAgent`, `RespirationAgent` import/export'ları kaldırıldı.
+- `gateway_agents/runner.py` — module docstring "three visual agents (gait, thermal, expression)"; import listesinde SkinAgent/RespirationAgent kaldırıldı; `Runner.__init__` 3 ajan instantiation + `max_workers=3`; `_analyze()` 3 future; `_build_bundle()` 3 arg; `close()` tuple 3 elemana indi.
+- `orchestration/llm.py` (MockLLMClient) — `skin` ve `respiration` heuristic blokları (yaklaşık 50 satır) tamamen silindi; weights for-loop tuple `("gait","thermal","expression")`. **Gait kalibrasyonu — kritik**: Önceki kuralda `severity:"high"` veya `sway:True` her durumda `yellow_flag` eklerdi (skin/respiration `severity:"high"` `red_flag` ekliyordu — kritik vakada gerçek kırmızı eşik o ikisinden geliyordu). 3 ajanlı dünyada gait severity:high tek başına `red_flag` ekleyecek şekilde ayrıştırıldı: artık `if severity == "high": red_flags += 1` ve diğer sway sinyalleri `elif has_sway or severity == "mild": yellow_flags += 1`. Bu olmadan `test_critical_case_returns_red` patlıyordu (sadece yellow_flag toplamı 3'e ulaşıyor, red_flag 0 kalıyordu).
+- `orchestration/prompts/supervisor.py` — system prompt "üç bağımsız görsel ajan (Yürüyüş, Termal, Yüz İfadesi)"; red/yellow/green kategori açıklamaları 3-ajan dünyasına göre yeniden yazıldı (skin/respiration ifadeleri çıkarıldı); per_agent_weights JSON template `{"gait":<>,"thermal":<>,"expression":<>}`; `missing_agents` set 3 elemana indi.
+- `orchestration/demo.py` — `critical_case` / `ambiguous_case` / `stable_case` fonksiyonları AgentBundle'a artık sadece gait+thermal+expression veriyor; eski demo signal'ları (`pallor`, `rate_bpm`) çıkarıldı.
+- Testler: `gateway_agents/tests/test_agents.py` — `TestSkinAgent`, `TestRespirationAgent` sınıfları + `_skin_obs`, `_respiration_obs`, `_periodic_motion_frames` helper'ları silindi; parametrize listesi 2 ajana indi. `gateway_agents/tests/test_runner.py` — `test_run_once_returns_bundle_with_five_observations` → `_three_observations`; bundle assert'leri (`bundle.skin`, `bundle.respiration`) kaldırıldı; `len(observations()) == 5` → `== 3`; "five" yerine "three" name iteration. `orchestration/tests/test_supervisor.py::test_low_confidence_is_demoted` — skin AgentObservation yerine gait observation (Literal artık skin'i kabul etmiyor).
+- `PROJECT_EXPLORER.md` — "5/5" → "3/3" sağlık özetinde; dosya ağacında `skin.py`, `respiration.py` satırları kaldırıldı; runner "5 ajan max_workers=5" → "3 ajan max_workers=3"; tüm "5 ajanlı AgentBundle" referansları "3 ajanlı"ya çevrildi.
+- **Veri yedekleme**: `.decisions/decisions.jsonl` (15 satır demo kaydı, hepsi 5 ajanlı snapshot içeriyordu) → `.decisions/decisions.jsonl.5agent.bak`. `.feedback/feedbacks.jsonl` (1 satır) → `.feedback/feedbacks.jsonl.5agent.bak`. Eski snapshot'lardaki `"agent":"skin"`/`"agent":"respiration"` entry'leri yeni Pydantic Literal'ı geçemediği için (validation hatası → "satır atlandı" warning loop) yedeklenip silindi. Geri yüklenmek istenirse schema esnetilmesi gerekir.
+- Doğrulama: `.venv/bin/py.test gateway_agents/tests/ orchestration/tests/` → **19/19 pass**. `python -m orchestration.demo` → 3 senaryo doğru kategori, per_agent_weights tam 3 anahtar. `curl POST /api/triage/demo?case=critical` → red dönüyor.
+
+### 3) Hemşire mesai paneli
+Kullanıcı "hangi hemşirenin ne zaman giriş/çıkış yaptığını dashboard'da göstersek güzel olur" deyince backend persist + header popover eklendi. Tasarım onayında: backend JSONL (cihazlar arası senkron), header popover (kompakt + ihtiyaç anında), giriş + çıkış kaydı seçildi.
+
+**Backend:**
+- `orchestration/schemas.py` — yeni `NurseSession` modeli: `session_id: str` (uuid hex), `nurse_first_name`, `nurse_last_name`, `hospital`, `login_at: datetime` (default `datetime.now(timezone.utc)`), `logout_at: datetime | None = None`. Aktif iken `logout_at=None`, kapandığında damgalı.
+- `orchestration/sessions_store.py` — **yeni dosya**. `JsonSessionStore` decisions/feedback pattern'i ile birebir. `start(first/last/hospital)` → uuid4().hex + login_at:now satırı append, NurseSession döner. `end(session_id)` → en son satırı bulur, `logout_at:now` ile override satırı append (idempotent: zaten kapalıysa aynısını döner; bilinmeyen id ise None). `list_all()` → her session_id için kapanışlı satır varsa onu döner (override: aynı id'de kapanışlı > açık), `login_at desc` sıralı. Append-only JSONL: `.sessions/sessions.jsonl`.
+- `backend_api/app/main.py` — `pydantic.BaseModel` ile request body modelleri (`_SessionStartBody`, `_SessionEndBody`) + 3 endpoint:
+  - `POST /api/sessions/start` — first_name/last_name/hospital alır, NurseSession döner.
+  - `POST /api/sessions/end` — session_id alır, idempotent. Bilinmeyen id'de sessizce 200 `{closed:false}`; kapatınca `{closed:true, session:{...}}`.
+  - `GET /api/sessions?limit=20` — son N kayıt, login_at desc.
+  - `lifespan` 'a `sessions_store = build_default_session_store()` eklendi.
+
+**Frontend:**
+- `frontend/lib/types.ts` — `NurseSessionRecord` interface.
+- `frontend/lib/api.ts` — `startSessionApi({firstName,lastName,hospital})` returns `NurseSessionRecord`; `endSessionApi(sessionId)` fail-silent (kullanıcı çıkıyor, hata yakalanmamalı); `fetchSessions(limit=20)` returns list.
+- `frontend/lib/session.ts` — `NurseSession` interface'ine `sessionId?: string` eklendi; `getSession()` localStorage'dan okurken parse ediyor; `setSession()` opsiyonel kabul ediyor.
+- `frontend/components/LoginScreen.tsx` — `handleSubmit` async oldu. Submit'te `busy` state aktif → button "Mesai kaydediliyor…" + disabled. `startSessionApi` çağrısı; backend ulaşılmazsa `console.warn` ile devam (UI'yi kilitlemez, lokal session yine yaratılır ama sessionId undefined olur — çıkışta endSession nop). Dönen session_id localStorage'a `setSession({sessionId})` ile yazılır.
+- `frontend/components/SessionGate.tsx` — `logout()` artık önce `getSession()` ile current oturumu okur, `sessionId` varsa `endSessionApi(sessionId)` (fire-and-forget, async), sonra `clearSession()` + `setLocalSession(null)`.
+- `frontend/components/Header.tsx` — `<ShiftHistoryPopover currentSessionId={session.sessionId} />` LiveClock ile Çıkış butonu arasına eklendi. Header root element'ine **`relative z-20`** verildi: Header'ın `backdrop-blur-xl` class'ı stacking context oluşturuyordu, aynı sayfada HistoryList kartı da (sağ sidebar) `backdrop-blur` ile stacking context. Aynı `z-auto` seviyesinde DOM order ile HistoryList Header'ın üstünde çiziliyordu → popover açılınca HistoryList altında kalıyordu. Header'a z-20 verilince Header'ın stacking context'i (popover dahil) HistoryList'in üstüne çıktı.
+- `frontend/components/ShiftHistoryPopover.tsx` — **yeni dosya**. Header'da pill buton: `History` ikonu + "Mesai" label + aktif oturum sayısı yeşil badge. Tıklayınca 360px (max viewport-2rem) dropdown açılır: en yeni 20 oturum, her biri kart olarak listelenir. Kart içeriği:
+  - Hemşire adı ("Ayşe Yılmaz") + "(Siz)" rozeti current session ise (slate-900 ring)
+  - Aktif/Kapandı durum rozeti (yeşil pulse veya gri dot)
+  - Hastane adı
+  - `dd.MM HH:mm → HH:mm` format giriş→çıkış (aktif ise `→ —`)
+  - Sağda süre: `<60dk → "23 dk"`, `>=60dk → "2 sa 14 dk"` formatı
+  - Aktif kart yeşilimsi arka plan (`emerald-50/60`), kapanmış nötr (`white/70`)
+  - Açıkken 15 sn poll (`setInterval`); dışına tıklayınca veya Escape ile kapanır (`mousedown` listener + key handler).
+
+**Test sırasında bulunan ve çözülen sorun:**
+- Popover açılınca sağ "Son kararlar" listesinin arkasında kalıyordu. Sebep: `backdrop-blur-xl` her iki kartta da stacking context oluşturuyor; DOM'da sonra gelen (HistoryList) üste çiziliyor; popover `z-30` koysak da kendi parent stacking context'inden (Header) dışarı taşamıyor. Çözüm: Header'a `relative z-20` — Header'ın tüm context'i HistoryList'in üzerine çıktı. Tek satırlık fix.
+
+**Canlı doğrulama:**
+- `POST /api/sessions/start` body `{"first_name":"Ayşe","last_name":"Yılmaz","hospital":"Acıbadem Maslak"}` → `{"session_id":"37c306...","login_at":"2026-05-20T09:34:55.530220Z","logout_at":null}`.
+- `GET /api/sessions` → açık oturum listede `logout_at:null`.
+- `POST /api/sessions/end {"session_id":"37c306..."}` → `{"closed":true,"session":{...,"logout_at":"2026-05-20T09:35:12.120813Z"}}`.
+- `GET /api/sessions` (sonra) → aynı id, override mantığıyla kapanışlı satır geliyor.
+- `.sessions/sessions.jsonl` 2 satır içeriyor (open + close override mantığı dosyada açıkça görünür).
+- Tarayıcıda: ikinci tarayıcı oturumu açılınca popover'da iki kayıt: "Ayşe Yılmaz · Kapandı" + "nvcgn nfnf · Aktif · Siz". Aktif sayısı badge'i 1.
+
+### Doğrulama özeti
+- ✅ `.venv/bin/py.test` → **19/19 pass**
+- ✅ `npx tsc --noEmit` (frontend) → clean
+- ✅ `python -m orchestration.demo` → red/yellow/green doğru kategori, per_agent_weights 3 anahtar
+- ✅ `curl /api/sessions/{start,end}` round-trip + JSONL persist doğrulandı
+- ✅ Backend + frontend ayakta (`uvicorn :8000` + `next dev :3000`), demo butonları çalışıyor, mesai popover canlı
+
+### Açık takipler (Faz 5.9 sonrası)
+- Mesai oturumu için otomatik kapanış: tarayıcı sertçe kapatılırsa oturum "Aktif" görünür. Basit yöntem: `beforeunload` + `navigator.sendBeacon` ile end POST (best-effort tarayıcı kapanışı sırasında); veya backend'de N saat idle olanları auto-close eden bir cron. Hackathon kapsamında düşük öncelik.
+- Eski 5-ajanlı `.decisions/decisions.jsonl.5agent.bak` ve `.feedback/feedbacks.jsonl.5agent.bak` yedeklerini yeni schema'ya migrate eden bir adapter. İmplementasyon: skin/respiration entry'lerini snapshot dict'ten silip kalan 3 ajanı validate et, sonra append. İsteğe bağlı.
+- `docs/teknik_rapor.md` hâlâ 5 ajan referansıyla. Pilot fazda raporun 3 ajan'a hizalanması.
+
+---
+
 ## Açık kararlar
 - **Ajan sayısı:** Hackathon kapsamında **3 ajan** (yürüyüş, ten rengi, solunum). `docs/teknik_rapor.md` şu an 5 ajandan bahsediyor (termal + yüz ifadesi); NotebookLM kaynaklarındaki versiyon 3 ajan. Hizalama beklemede.
 - **LLM provider:** `OPENAI_API_KEY` veya `ANTHROPIC_API_KEY` yoksa `MockLLMClient` otomatik devreye girer. Demo için API key olsa daha zengin gerekçe çıkar.
 
-## Açık kararlar (güncellendi)
-- **Ajan sayısı:** Uygulama **5 ajan** (gait, skin, respiration, thermal, **expression** — 2026-05-16 eklendi). `docs/teknik_rapor.md`'deki 5 ajan iddiasıyla artık birebir hizalı.
+## Açık kararlar (güncellendi 2026-05-20 — Faz 5.9 sonrası)
+- **Ajan sayısı:** Uygulama **3 ajan** (gait, thermal, expression). 2026-05-20 turunda skin ve respiration ajanları üretim pipeline'ından kaldırıldı (kapı kamerasında 3 sn'lik pencerede güvenilir sinyal vermiyorlardı; gait severity:high + thermal fever/hypothermia + expression pain/asymmetry/consciousness üçlüsü ESI çoklu-modalite kararı için yeterli). `docs/teknik_rapor.md`'deki 5 ajan iddiasıyla artık aykırı — pilot fazda raporun güncellenmesi planlandı.
+
+## Açık kararlar (eski — referans için)
+- ~~**Ajan sayısı:** Uygulama **5 ajan** (gait, skin, respiration, thermal, **expression** — 2026-05-16 eklendi). `docs/teknik_rapor.md`'deki 5 ajan iddiasıyla artık birebir hizalı.~~ → 2026-05-20'de 3 ajana indirildi.
 - **LLM provider:** API key yoksa `MockLLMClient` otomatik devreye girer. Gerçek LLM için `.env`'e `ANTHROPIC_API_KEY` veya `OPENAI_API_KEY` girilmeli.
 - **Termal kamera:** Şu an `rgb_proxy` modunda. Gerçek MLX90640/FLIR bağlandığında `ThermalAgent.analyze()`'a sıcaklık matrisi besleyecek ayrı bir `ThermalSource` yazılmalı.
 - **Hemşire verdict persistance:** Frontend'te Onayla/Reddet/Değiştir akışı tamamlandı (2026-05-14), ama backend'e POST yapılmıyor. Verdict'ler `useTriageStream` içindeki `verdicts` map'inde — tarayıcı belleğinde. `POST /api/triage/feedback` endpoint'i + ChromaDB persistance gerekiyor; supervisor öğrenmesi bu veriyi kullanacak.

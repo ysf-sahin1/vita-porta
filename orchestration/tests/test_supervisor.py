@@ -41,11 +41,11 @@ async def test_empty_bundle_is_insufficient(supervisor: Supervisor) -> None:
 async def test_low_confidence_is_demoted(supervisor: Supervisor) -> None:
     bundle = AgentBundle(
         patient_id="demo-noisy",
-        skin=AgentObservation(
-            agent="skin",
+        gait=AgentObservation(
+            agent="gait",
             confidence=0.2,
-            summary_tr="Belirsiz solgunluk sinyali",
-            signals={"pallor": True, "severity": "high"},
+            summary_tr="Belirsiz sallantı sinyali",
+            signals={"sway": True, "severity": "high"},
         ),
     )
     decision = await supervisor.decide(bundle)
