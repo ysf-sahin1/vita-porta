@@ -295,7 +295,7 @@ def test_no_esp_host_skips_verdict_callback(
 def test_low_confidence_bundle_is_not_posted(
     capture_post: list[dict[str, Any]],
 ) -> None:
-    """Tüm ajan güveni 0.3 eşiğinin altındaysa backend'e POST atılmamalı."""
+    """Tüm ajan güveni eşik altındaysa backend'e POST atılmamalı."""
 
     source = FakeFrameSource(count=45, fps=15.0)
     with Runner(source=source) as runner:
@@ -309,15 +309,38 @@ def test_low_confidence_bundle_is_not_posted(
 def test_meaningful_bundle_is_posted(
     capture_post: list[dict[str, Any]],
 ) -> None:
-    """En az bir ajan eşiği geçtiğinde bundle gönderilmeli."""
+    """3 ajan da eşiğini geçtiğinde bundle gönderilmeli.
+
+    Eşikler: gait 0.40, thermal 0.50, expression 0.35. 0.6 üçünü de aşar.
+    """
 
     source = FakeFrameSource(count=45, fps=15.0)
     with Runner(source=source) as runner:
-        _patch_agents(runner, confidence=0.4)
+        _patch_agents(runner, confidence=0.6)
         bundle = runner.run_once()
 
     assert bundle is not None
     assert len(capture_post) == 1
+
+
+def test_partial_confidence_bundle_is_not_posted(
+    capture_post: list[dict[str, Any]],
+) -> None:
+    """Tek ajan eşik altında kaldığında bundle backend'e gitmemeli.
+
+    Stub'larda thermal'i eşik (0.50) altına çekiyoruz; gait/expression
+    yeterli. all() gate olduğu için yine de POST atılmamalı.
+    """
+
+    source = FakeFrameSource(count=45, fps=15.0)
+    with Runner(source=source) as runner:
+        _patch_agents(runner, confidence=0.6)
+        # thermal'i tek başına eşik altına çek
+        runner._thermal = _StubAgent("thermal", 0.3)  # type: ignore[assignment]
+        bundle = runner.run_once()
+
+    assert bundle is not None
+    assert capture_post == []
 
 
 def test_low_confidence_bundle_skips_verdict_callback(

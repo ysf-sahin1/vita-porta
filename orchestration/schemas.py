@@ -51,17 +51,59 @@ class AgentObservation(BaseModel):
 
 
 class AgentBundle(BaseModel):
-    """The set of observations the supervisor evaluates together."""
+    """The set of observations the supervisor evaluates together.
+
+    All three modalities (gait, thermal, expression) are required — analiz
+    politikası: 3 ajan bir arada gelmezse triaj yapılmaz. Eksik veri
+    ``confidence=0`` ile gelen bir AgentObservation olarak temsil edilir,
+    None ile değil.
+    """
 
     patient_id: str = Field(default_factory=lambda: uuid4().hex[:8])
-    gait: AgentObservation | None = None
-    thermal: AgentObservation | None = None
-    expression: AgentObservation | None = None
+    gait: AgentObservation
+    thermal: AgentObservation
+    expression: AgentObservation
     captured_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     def observations(self) -> list[AgentObservation]:
-        candidates = (self.gait, self.thermal, self.expression)
-        return [obs for obs in candidates if obs is not None]
+        return [self.gait, self.thermal, self.expression]
+
+
+# Üç ajanın da analize girebilmesi için minimum güven eşikleri.
+# - gait: MediaPipe pose visibility — yarı görünürlük (0.40) yeterli sayılır.
+# - thermal: AMG LOW-confirmed (0.55) ile RGB proxy mid-range arası taban.
+#            0.50 LOW okumayı kabul ederken çok zayıf proxy'yi (face_ratio<0.45) eler.
+# - expression: face_mesh tavanı 0.55 proxy modunda; 0.35 = face_ratio ~0.27 = "yüz var".
+#
+# Eşik altında kalan ajan "gözlem üretti ama veri zayıf" demektir; bundle analiz
+# için INSUFFICIENT işaretlenir. Hem runner (POST-öncesi) hem supervisor
+# (LLM-öncesi) hem de backend (curl bypass için) bu sözlüğe bakar — single source.
+AGENT_PRESENCE_THRESHOLDS: dict[str, float] = {
+    "gait": 0.40,
+    "thermal": 0.50,
+    "expression": 0.35,
+}
+
+
+def bundle_completeness_issues(bundle: "AgentBundle") -> list[tuple[str, str]]:
+    """3 ajanın da kendi eşiğinin üstünde olup olmadığını döndürür.
+
+    Returns:
+        Eşiği geçmeyen ajanlar için (agent_name, reason) tuple listesi.
+        Boş liste → 3'ü de eşik üstünde, analize girebilir.
+    """
+    issues: list[tuple[str, str]] = []
+    obs_by_agent = {o.agent: o for o in bundle.observations()}
+    for agent, threshold in AGENT_PRESENCE_THRESHOLDS.items():
+        obs = obs_by_agent.get(agent)
+        if obs is None:
+            issues.append((agent, "gözlem yok"))
+            continue
+        if obs.confidence < threshold:
+            issues.append(
+                (agent, f"güven {obs.confidence:.2f} < {threshold:.2f}")
+            )
+    return issues
 
 
 class HistoricalFeedback(BaseModel):

@@ -26,6 +26,7 @@ from orchestration.schemas import (
     HistoricalFeedback,
     TriageCategory,
     TriageDecision,
+    bundle_completeness_issues,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,7 @@ class _SupervisorState(TypedDict, total=False):
     raw_decision: dict
     decision: TriageDecision
     started_ms: float
+    is_complete: bool
 
 
 @dataclass
@@ -53,11 +55,19 @@ class Supervisor:
 
     def _build_graph(self):
         graph: StateGraph = StateGraph(_SupervisorState)
+        graph.add_node("check_completeness", self._check_completeness)
         graph.add_node("retrieve_rag", self._retrieve_rag)
         graph.add_node("retrieve_feedback", self._retrieve_feedback)
         graph.add_node("ask_llm", self._ask_llm)
         graph.add_node("validate", self._validate)
-        graph.set_entry_point("retrieve_rag")
+        graph.set_entry_point("check_completeness")
+        # Eksik veride LLM/RAG'i hiç çalıştırma — doğrudan validate'e atla.
+        # validate state'teki raw_decision'ı (insufficient) TriageDecision'a sarar.
+        graph.add_conditional_edges(
+            "check_completeness",
+            self._route_after_completeness,
+            {"complete": "retrieve_rag", "incomplete": "validate"},
+        )
         graph.add_edge("retrieve_rag", "retrieve_feedback")
         graph.add_edge("retrieve_feedback", "ask_llm")
         graph.add_edge("ask_llm", "validate")
@@ -68,6 +78,32 @@ class Supervisor:
         initial: _SupervisorState = {"bundle": bundle, "started_ms": time.perf_counter() * 1000}
         final = await self._graph.ainvoke(initial)
         return final["decision"]
+
+    async def _check_completeness(self, state: _SupervisorState) -> _SupervisorState:
+        """3 ajan da eşik üstünde mi? Değilse LLM/RAG'i atla, INSUFFICIENT yaz."""
+
+        bundle = state["bundle"]
+        issues = bundle_completeness_issues(bundle)
+        if not issues:
+            return {"is_complete": True}
+
+        missing_summary = ", ".join(f"{agent} ({reason})" for agent, reason in issues)
+        logger.info(
+            "Supervisor: eksik ajan(lar) → LLM atlandı: %s", missing_summary
+        )
+        raw = {
+            "category": "insufficient",
+            "rationale_tr": (
+                f"Veri yetersiz — eksik/zayıf ajan(lar): {missing_summary}. "
+                "Analiz için postür + sıcaklık + yüz ifadesi bir arada gerekir."
+            ),
+            "confidence": 0.0,
+            "per_agent_weights": {},
+        }
+        return {"is_complete": False, "raw_decision": raw}
+
+    def _route_after_completeness(self, state: _SupervisorState) -> str:
+        return "complete" if state.get("is_complete") else "incomplete"
 
     async def _retrieve_rag(self, state: _SupervisorState) -> _SupervisorState:
         bundle = state["bundle"]

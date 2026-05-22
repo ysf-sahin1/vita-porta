@@ -31,21 +31,20 @@ from gateway_agents.agents import (
     ThermalAgent,
 )
 from gateway_agents.io import EspCamSource, FrameSource, VideoFileSource, WebcamSource
-from orchestration.schemas import AgentBundle, AgentObservation
+from orchestration.schemas import AgentBundle, AgentObservation, bundle_completeness_issues
 
 logger = logging.getLogger("vita_porta.runner")
 
 _TRIAGE_ENDPOINT = "/api/triage/run"
-_HTTP_TIMEOUT_S = 10.0
+# Soğuk başlangıçta supervisor pipeline'ı (ChromaDB embed + RAG + Anthropic +
+# feedback retrieve) 10sn'yi aşabiliyor — özellikle ilk birkaç pencerede.
+# Sıcak cache ile genelde 2-4sn. 30sn marj yeterli, donmaktan korur.
+_HTTP_TIMEOUT_S = 30.0
 
 
 _VERDICT_TIMEOUT_S = 1.5
 _ESP_PORT = 80
 _VALID_VERDICT_LEVELS = {"red", "yellow", "green", "insufficient"}
-
-# En az bir ajan bu eşiği geçmiyorsa bundle "anlamsız" sayılır ve backend'e
-# gönderilmez. Kapıda hasta yokken sürekli LLM çağırmamak için kalkan.
-_MEANINGFUL_CONFIDENCE_THRESHOLD = 0.3
 
 
 class Runner:
@@ -180,23 +179,26 @@ class Runner:
         return _build_bundle(gait_obs, thermal_obs, expression_obs)
 
     def _is_bundle_meaningful(self, bundle: AgentBundle) -> bool:
-        """En az bir ajanın güveni eşiğin üstündeyse bundle anlamlıdır.
+        """3 ajanın da kendi eşiğinin üstünde olmasını şart koşar.
 
-        Kapıda kimse olmadığında 3 ajan da düşük/sıfır güvenle gelir; bu
-        bundle'ı backend'e iletmek anlamsız LLM çağrısı + history kirliliği
-        üretir.
+        Analiz politikası (kullanıcı kararı): postür + sıcaklık + yüz ifadesi
+        BİR ARADA gelmezse triaj yapılmaz. Tek modaliteyle LLM çağırmak hem
+        token israfı hem de garbage-in-garbage-out üretiyor. Eksik kalan
+        ajanları debug log'a kaydederiz ki demo'da hangi sensörün düştüğü
+        anında görülsün.
         """
-        return any(
-            obs.confidence >= _MEANINGFUL_CONFIDENCE_THRESHOLD
-            for obs in bundle.observations()
-        )
+        issues = bundle_completeness_issues(bundle)
+        if issues:
+            logger.debug(
+                "Bundle eksik (%d/3 ajan eşik altında): %s",
+                len(issues),
+                ", ".join(f"{a}({r})" for a, r in issues),
+            )
+            return False
+        return True
 
     def _post_bundle(self, bundle: AgentBundle) -> None:
         if not self._is_bundle_meaningful(bundle):
-            logger.debug(
-                "Bundle anlamsız (tüm ajan güveni < %.2f) — backend'e gönderilmedi.",
-                _MEANINGFUL_CONFIDENCE_THRESHOLD,
-            )
             return
 
         url = f"{self.backend_url}{_TRIAGE_ENDPOINT}"
