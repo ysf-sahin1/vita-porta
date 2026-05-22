@@ -8,8 +8,10 @@
 // Klinik karar (normal / şüpheli / anormal) ana bilgisayardaki LLM'e ait.
 // Karar /verdict?level=... ile geri gelir, LED'i sürer.
 //
-// Çözünürlük: VGA (640x480) — face mesh ve pose detection için minimum.
-// Hedef FPS: ~10 (bu klon için ampirik tavan).
+// Çözünürlük: VGA (640x480) — face mesh ve pose detection için minimum yeterli.
+// Hedef FPS: ~10 (orijinal stable konfigürasyon, XCLK 16 MHz + fb_count 1).
+// NOT: XCLK 20'de bu klon kararsız, fb_count 2 PSRAM bandwidth çakıştırıyor —
+// bu iki "iyileştirme"yi denersen FPS spike-drop jitter'ı geri gelir.
 //
 // Endpoint'ler:
 //   - Port 80  /          → ana sayfa (canlı görüntü + termal + istatistikler)
@@ -28,10 +30,22 @@
 #include <Preferences.h>
 
 // ============================================================
-//  ⚙️  WI-FI BİLGİLERİNİ BURAYA GİR
+//  ⚙️  AP MODU — ESP KENDİ AĞINI YAYINLAR
 // ============================================================
-const char* WIFI_SSID     = "FiberHGW_ZT73ZD";
-const char* WIFI_PASSWORD = "DAbahR9PzRFY";
+// Demo akışı:
+//   1. ESP açılır → "VitaPorta" SSID'sini yayınlar
+//   2. PC bu ağa bağlanır (şifre: vitaporta123) → 192.168.4.x IP alır
+//   3. PC'nin internete çıkışı USB tethering'den (iPhone Lightning) gelir
+//   4. Gateway: python -m gateway_agents.runner --esp 192.168.4.1
+//
+// ESP softAP IP'si default 192.168.4.1 (sabit). PC bu IP'ye HTTP istek atar:
+//   http://192.168.4.1/          → ana sayfa
+//   http://192.168.4.1:81/stream → MJPEG akış
+//   http://192.168.4.1/thermal   → AMG JSON
+//   http://192.168.4.1/verdict   → LED kararı (gateway GET)
+// ============================================================
+const char* WIFI_SSID     = "VitaPorta";
+const char* WIFI_PASSWORD = "vitaporta123";   // WPA2, min 8 karakter şart
 // ============================================================
 
 // ----- AI-Thinker ESP32-CAM pin haritası -----
@@ -1138,7 +1152,8 @@ void handleInfo() {
   json += "\"bytes_sent\":" + String((uint32_t)bytes_sent) + ",";
   json += "\"last_frame_size\":" + String((uint32_t)last_frame_size) + ",";
   json += "\"ms_since_last_frame\":" + String(since) + ",";
-  json += "\"rssi_dbm\":" + String(WiFi.RSSI()) + ",";
+  // AP modunda RSSI anlamsız; bağlı istemci sayısı diagnostik için daha faydalı.
+  json += "\"ap_clients\":" + String(WiFi.softAPgetStationNum()) + ",";
   json += "\"uptime_s\":" + String(millis() / 1000) + ",";
   json += "\"psram\":" + String(psramFound() ? "true" : "false") + ",";
   json += "\"free_heap\":" + String(ESP.getFreeHeap()) + ",";
@@ -1156,7 +1171,7 @@ void handleInfo() {
 
 // ---- Port 80: ana HTML sayfası (kamera + termal grid + cilt sıcaklığı) ----
 void handleRoot() {
-  String ip = WiFi.localIP().toString();
+  String ip = WiFi.softAPIP().toString();
   String html =
     "<!doctype html><html><head><meta charset='utf-8'>"
     "<title>Vita Porta — Canli Yayin + Termal</title>"
@@ -1375,17 +1390,15 @@ bool initCamera() {
   config.pin_sccb_scl = SIOC_GPIO_NUM;
   config.pin_pwdn     = PWDN_GPIO_NUM;
   config.pin_reset    = RESET_GPIO_NUM;
-  config.xclk_freq_hz = 20000000;
+  config.xclk_freq_hz = 16000000;            // 16 MHz: 20'de kart kararsız
   config.pixel_format = PIXFORMAT_JPEG;
-  config.grab_mode    = CAMERA_GRAB_LATEST;
+  config.grab_mode    = CAMERA_GRAB_WHEN_EMPTY;
   config.fb_location  = psramFound() ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM;
 
   if (psramFound()) {
-    // VGA: face mesh, pose detection ve respiration için minimum yeterli.
-    // ESP32-CAM bu boyutta 20-25 FPS rahat verir.
-    config.frame_size   = FRAMESIZE_VGA;   // 640x480
-    config.jpeg_quality = 10;              // 0-63, düşük=kaliteli (10 dengeli)
-    config.fb_count     = 2;
+    config.frame_size   = FRAMESIZE_VGA;     // 640x480
+    config.jpeg_quality = 12;                // 12 sweet spot; 14+ DSP issues
+    config.fb_count     = 1;                 // fb_count=2 PSRAM bandwidth çakıştırıyor
   } else {
     config.frame_size   = FRAMESIZE_QVGA;
     config.jpeg_quality = 12;
@@ -1398,22 +1411,20 @@ bool initCamera() {
     return false;
   }
 
-  // Sensor ince ayar
+  // Sensor ince ayar — orijinal stable konfigürasyon (d6be0dd).
+  // Sonraki commit'te eklenen aec2/dcw/bpc/wpc/lenc tweak'leri frame başına
+  // ek pipeline + AEC jitter üretip "spike 25 → drop 8 FPS" paternine
+  // sebep oldu. Burada minimal set: auto exposure/whitebal/gain, brightness
+  // ve contrast nötr.
   sensor_t* s = esp_camera_sensor_get();
   if (s) {
-    s->set_brightness(s, 1);
-    s->set_contrast(s, 1);
+    s->set_brightness(s, 0);
+    s->set_contrast(s, 0);
     s->set_saturation(s, 0);
     s->set_whitebal(s, 1);
     s->set_awb_gain(s, 1);
     s->set_exposure_ctrl(s, 1);
     s->set_gain_ctrl(s, 1);
-    s->set_aec2(s, 1);             // AEC algoritma 2 — daha hızlı poz adaptasyonu
-    s->set_dcw(s, 1);              // downsize/crop window — keskinlik için
-    s->set_bpc(s, 1);              // black pixel correction
-    s->set_wpc(s, 1);              // white pixel correction
-    s->set_raw_gma(s, 1);          // gamma düzeltme
-    s->set_lenc(s, 1);             // lens correction
   }
   return true;
 }
@@ -1427,6 +1438,12 @@ void setup() {
   Serial.println("=========================================");
   Serial.printf("[BOOT] PSRAM: %s\n", psramFound() ? "VAR (4MB)" : "YOK");
 
+  // Bluetooth radyosunu kapat — ESP32-CAM'de WiFi + BT aynı 2.4GHz radyoyu
+  // paylaşır. BT'yi durdurmak antenna time slot'unu tamamen WiFi'ye verir,
+  // ara sıra olan "FPS 10 → 5 dip" jitter'ı önemli ölçüde azalır.
+  btStop();
+  Serial.println("[RF] Bluetooth durduruldu, radyo WiFi'ye tahsis edildi");
+
   // LED pinleri — R + G (IO14 artık AMG SCL, B feda edildi)
   pinMode(LED_R_PIN, OUTPUT);
   pinMode(LED_G_PIN, OUTPUT);
@@ -1439,7 +1456,7 @@ void setup() {
     Serial.println("DURDURULDU");
     while (true) delay(1000);
   }
-  Serial.println("OK (VGA 640x480)");
+  Serial.println("OK (VGA 640x480, JPEG q12, XCLK 16MHz, fb_count 1)");
 
   // Kalibrasyon parametreleri NVS'ten (yoksa defaults)
   loadCalibration();
@@ -1449,23 +1466,24 @@ void setup() {
     Serial.println("[AMG] Sensor olmadan devam (termal endpoint bos donecek)");
   }
 
-  Serial.printf("[WIFI] Baglaniliyor: %s ", WIFI_SSID);
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.printf("[WIFI] AP modu basliyor: SSID=%s\n", WIFI_SSID);
+  WiFi.mode(WIFI_AP);
+  // Subnet 192.168.4.0/24, ESP gateway sabit 192.168.4.1 (softAP default).
+  // PC bu ağa bağlandığında DHCP'den 192.168.4.2+ alır.
+  WiFi.softAPConfig(IPAddress(192, 168, 4, 1),
+                    IPAddress(192, 168, 4, 1),
+                    IPAddress(255, 255, 255, 0));
+  // channel=1 (en güvenli default), hidden=0, max_connection=4
+  bool ap_ok = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, 0, 4);
   WiFi.setSleep(false);
-  uint32_t start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 20000) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println();
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[WIFI] BAGLANAMADI");
+  if (!ap_ok) {
+    Serial.println("[WIFI] AP BASLATILAMADI");
     while (true) delay(1000);
   }
-  Serial.print("[WIFI] Bagli. IP: ");
-  Serial.println(WiFi.localIP());
-  Serial.printf("[WIFI] RSSI: %d dBm\n", WiFi.RSSI());
+  Serial.print("[WIFI] AP aktif. ESP IP: ");
+  Serial.println(WiFi.softAPIP());
+  Serial.printf("[WIFI] PC su aga baglansin: SSID='%s' sifre='%s'\n",
+                WIFI_SSID, WIFI_PASSWORD);
 
   server.on("/", handleRoot);
   server.on("/capture", handleCapture);
@@ -1482,12 +1500,17 @@ void setup() {
 
   startStreamServer();
 
+  String ap_ip = WiFi.softAPIP().toString();
   Serial.println();
   Serial.println("=========================================");
-  Serial.printf(">>> Ana sayfa : http://%s/\n", WiFi.localIP().toString().c_str());
-  Serial.printf(">>> Stream    : http://%s:81/stream\n", WiFi.localIP().toString().c_str());
-  Serial.printf(">>> Info JSON : http://%s/info\n", WiFi.localIP().toString().c_str());
-  Serial.printf(">>> Thermal   : http://%s/thermal\n", WiFi.localIP().toString().c_str());
+  Serial.println(">>> AP MODU AKTIF");
+  Serial.printf(">>> SSID      : %s\n", WIFI_SSID);
+  Serial.printf(">>> Sifre     : %s\n", WIFI_PASSWORD);
+  Serial.printf(">>> Ana sayfa : http://%s/\n", ap_ip.c_str());
+  Serial.printf(">>> Stream    : http://%s:81/stream\n", ap_ip.c_str());
+  Serial.printf(">>> Info JSON : http://%s/info\n", ap_ip.c_str());
+  Serial.printf(">>> Thermal   : http://%s/thermal\n", ap_ip.c_str());
+  Serial.println(">>> Gateway   : python -m gateway_agents.runner --esp 192.168.4.1");
   Serial.println("=========================================");
 }
 
@@ -1501,8 +1524,12 @@ void loop() {
     tryBeginAMG(true);
   }
 
-  // AMG periyodik okuma — 200ms (~5Hz, AMG max 10Hz)
-  if (amg_ok && millis() - amg_last_read_ms >= 200) {
+  // AMG periyodik okuma — 250ms (~4Hz, AMG max 10Hz).
+  // 200ms'den 250ms'e çıkarıldı: readAMG() + computeSkinTemp() ~15-20ms
+  // blok main loop'ta. 50ms daha seyrek olmak server.handleClient ve
+  // dolayısıyla /thermal istek-cevap'ını rahatlatıyor, ara sıra olan
+  // FPS dip'lerini eler. Termal güncelleme tazeliği 4Hz fazlasıyla yeterli.
+  if (amg_ok && millis() - amg_last_read_ms >= 250) {
     amg_last_read_ms = millis();
     readAMG();
   }
@@ -1547,9 +1574,10 @@ void loop() {
   static uint32_t last_report = 0;
   if (millis() - last_report > 5000) {
     last_report = millis();
-    Serial.printf("[STATS] FPS=%.1f res=%ux%u frames=%u heap=%uKB RSSI=%ddBm\n",
+    Serial.printf("[STATS] FPS=%.1f res=%ux%u frames=%u heap=%uKB clients=%d\n",
                   measured_fps, current_w, current_h,
-                  (uint32_t)frames_sent, ESP.getFreeHeap() / 1024, WiFi.RSSI());
+                  (uint32_t)frames_sent, ESP.getFreeHeap() / 1024,
+                  (int)WiFi.softAPgetStationNum());
     if (amg_ok) {
       if (person_present) {
         Serial.printf("[SKIN] skin=%.2fC raw=%.2f amb=%.2f dT=%.2f d=%.0fcm Q=%.2f conf=%d\n",
