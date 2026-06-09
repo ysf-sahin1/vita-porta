@@ -1,0 +1,24 @@
+[Unit]
+Description=Vita Porta Hemşire Dashboard (Next.js)
+Documentation=https://github.com/ysf-sahin1/vita-porta
+After=vita-porta-backend.service network.target
+Wants=vita-porta-backend.service
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/vita-porta/frontend
+Environment="NODE_ENV=production"
+Environment="PORT=3000"
+# NEXT_PUBLIC_API_URL: tarayıcıdan Pi'ye ulaşan backend adresi
+Environment="NEXT_PUBLIC_API_URL=http://192.168.4.1:8000"
+ExecStart=/usr/bin/npm start
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vita-porta-frontend
+
+[Install]
+WantedBy=multi-user.target

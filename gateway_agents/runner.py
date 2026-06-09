@@ -7,11 +7,13 @@ to the backend's ``/api/triage/run`` endpoint.
 
 CLI usage::
 
-    python -m gateway_agents.runner                       # default: webcam index 0
+    python -m gateway_agents.runner                           # default: webcam index 0
     python -m gateway_agents.runner --video data/demo/red.mp4
     python -m gateway_agents.runner --webcam 0
     python -m gateway_agents.runner --mqtt
-    python -m gateway_agents.runner --esp 192.168.1.42
+    python -m gateway_agents.runner --esp 192.168.4.1
+    python -m gateway_agents.runner --esp 192.168.4.1 --pir-pin 17   # Raspberry Pi + PIR
+    python -m gateway_agents.runner --webcam 0 --mock-pir             # PIR olmadan test
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from gateway_agents.agents import (
     ThermalAgent,
 )
 from gateway_agents.io import EspCamSource, FrameSource, VideoFileSource, WebcamSource
+from gateway_agents.io.pir import PirProtocol, build_pir_trigger
 from orchestration.schemas import AgentBundle, AgentObservation, bundle_completeness_issues
 
 logger = logging.getLogger("vita_porta.runner")
@@ -64,6 +67,7 @@ class Runner:
         window_duration_s: float = 3.0,
         max_workers: int = 3,
         esp_host: str | None = None,
+        pir: PirProtocol | None = None,
     ) -> None:
         self.source = source
         self.backend_url = backend_url.rstrip("/")
@@ -79,6 +83,7 @@ class Runner:
 
         self._frame_iter = source.frames()
         self._closed = False
+        self._pir = pir
 
     # ------------------------------------------------------------------ public
 
@@ -102,11 +107,23 @@ class Runner:
         self._post_bundle(bundle)
         return bundle
 
-    def run_forever(self) -> None:
-        """Loop ``run_once`` until the source is exhausted or Ctrl+C is hit."""
+    def run_forever(self, pir: PirProtocol | None = None) -> None:
+        """Loop ``run_once`` until the source is exhausted or Ctrl+C is hit.
+
+        Args:
+            pir: PIR tetikleyici. Verilirse her analiz penceresi öncesinde
+                 hareket algılanana kadar bloke eder. None ise sürekli çalışır.
+        """
+        if pir is not None:
+            logger.info("PIR modu aktif — hareket algılanmadan analiz başlamaz.")
 
         try:
             while True:
+                if pir is not None and not pir.motion_detected:
+                    logger.info("PIR: hareket bekleniyor...")
+                    pir.wait_for_motion()
+                    logger.info("PIR: hareket algılandı, analiz başlıyor.")
+
                 bundle = self.run_once()
                 if bundle is None:
                     logger.info("Kaynak tükendi; döngü sonlandırılıyor.")
@@ -141,6 +158,12 @@ class Runner:
             self.source.close()
         except Exception:  # noqa: BLE001
             logger.debug("Kaynak kapanışında hata yutuldu.", exc_info=True)
+
+        if self._pir is not None:
+            try:
+                self._pir.close()
+            except Exception:  # noqa: BLE001
+                logger.debug("PIR kapatılırken hata yutuldu.", exc_info=True)
 
     # ---------------------------------------------------------------- context
 
@@ -323,6 +346,21 @@ def _build_argparser() -> argparse.ArgumentParser:
     parser.add_argument("--backend", type=str, default="http://127.0.0.1:8000")
     parser.add_argument("--window", type=float, default=3.0, help="Pencere süresi (sn).")
     parser.add_argument("--log-level", default="INFO")
+    # Raspberry Pi PIR sensörü
+    pir_group = parser.add_mutually_exclusive_group()
+    pir_group.add_argument(
+        "--pir-pin",
+        type=int,
+        default=None,
+        metavar="GPIO",
+        help="Raspberry Pi PIR sensörünün GPIO pin numarası (BCM, ör. 17). "
+             "PIR_PIN ortam değişkeniyle de ayarlanabilir.",
+    )
+    pir_group.add_argument(
+        "--mock-pir",
+        action="store_true",
+        help="Gerçek GPIO olmadan PIR modunu simüle eder (geliştirme/test).",
+    )
     return parser
 
 
@@ -350,14 +388,24 @@ def main(argv: list[str] | None = None) -> int:
         args.backend,
     )
 
+    import os as _os
+
+    pir: PirProtocol | None = None
+    pir_pin = args.pir_pin or (_os.getenv("PIR_PIN") and int(_os.environ["PIR_PIN"]))
+    if args.mock_pir:
+        pir = build_pir_trigger(pin=0, mock_fallback=True)
+    elif pir_pin:
+        pir = build_pir_trigger(pin=int(pir_pin), mock_fallback=False)
+
     source = _make_source(args)
     with Runner(
         source=source,
         backend_url=args.backend,
         window_duration_s=args.window,
         esp_host=args.esp,
+        pir=pir,
     ) as runner:
-        runner.run_forever()
+        runner.run_forever(pir=pir)
     return 0
 
 

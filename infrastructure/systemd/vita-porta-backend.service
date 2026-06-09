@@ -1,0 +1,25 @@
+[Unit]
+Description=Vita Porta Backend API (FastAPI)
+Documentation=https://github.com/ysf-sahin1/vita-porta
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/vita-porta
+EnvironmentFile=/home/pi/vita-porta/.env
+Environment="PATH=/home/pi/vita-porta/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/home/pi/vita-porta/venv/bin/uvicorn backend_api.app.main:app \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --workers 1
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vita-porta-backend
+
+[Install]
+WantedBy=multi-user.target

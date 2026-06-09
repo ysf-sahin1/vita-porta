@@ -8,6 +8,7 @@ to Chroma is a constructor change.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Protocol
 
 from orchestration.rag.esi_cases import ESI_SEED_CASES
@@ -63,11 +64,19 @@ class ChromaRetriever:
         )
         return self._collection
 
-    async def retrieve(self, query: str, *, k: int = 3) -> list[str]:
+    def _sync_retrieve(self, query: str, k: int) -> list[str]:
         collection = self._ensure_collection()
         result = collection.query(query_texts=[query], n_results=k)
         documents = result.get("documents") or [[]]
         return list(documents[0])
+
+    async def retrieve(self, query: str, *, k: int = 3) -> list[str]:
+        # ChromaDB ve sentence-transformers senkron — thread pool'da çalıştır,
+        # event loop'u bloke etme.
+        try:
+            return await asyncio.to_thread(self._sync_retrieve, query, k)
+        except Exception:
+            return await InMemoryRetriever().retrieve(query, k=k)
 
 
 def build_default_retriever() -> RagRetriever:

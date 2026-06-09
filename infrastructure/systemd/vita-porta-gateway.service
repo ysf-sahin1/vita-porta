@@ -1,0 +1,28 @@
+[Unit]
+Description=Vita Porta Gateway (ESP32-CAM + PIR + Ajanlар)
+Documentation=https://github.com/ysf-sahin1/vita-porta
+After=vita-porta-backend.service network.target
+Requires=vita-porta-backend.service
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+# GPIO erişimi için 'gpio' grubuna üyelik gereklidir (pi_setup.sh halleder)
+SupplementaryGroups=gpio
+WorkingDirectory=/home/pi/vita-porta
+EnvironmentFile=/home/pi/vita-porta/.env
+Environment="PATH=/home/pi/vita-porta/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/home/pi/vita-porta/venv/bin/python -m gateway_agents.runner \
+    --esp ${ESP_HOST:-192.168.4.2} \
+    --pir-pin ${PIR_PIN:-17} \
+    --relay-port 8765 \
+    --backend http://127.0.0.1:8000
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vita-porta-gateway
+
+[Install]
+WantedBy=multi-user.target

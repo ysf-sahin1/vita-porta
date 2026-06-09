@@ -29,8 +29,8 @@ class AnthropicClient(LLMClient):
     async def complete_json(self, system: str, user: str) -> dict:
         response = await self._client.messages.create(
             model=self._model,
-            max_tokens=1024,
-            system=system,
+            max_tokens=512,
+            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             messages=[{"role": "user", "content": user}],
         )
         text = "".join(block.text for block in response.content if block.type == "text")

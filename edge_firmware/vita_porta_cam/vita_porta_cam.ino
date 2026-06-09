@@ -21,31 +21,29 @@
 //   - Port 80  /verdict   → LLM kararını al, LED'i sür
 //   - Port 81  /stream    → MJPEG canlı akış (gateway buradan çeker)
 
+
 #include "esp_camera.h"
 #include "esp_http_server.h"
 #include <WiFi.h>
+#include <WiFiMulti.h>
 #include <WebServer.h>
 #include <Wire.h>
 #include <Adafruit_AMG88xx.h>
 #include <Preferences.h>
 
+WiFiMulti wifiMulti;
+
 // ============================================================
-//  ⚙️  AP MODU — ESP KENDİ AĞINI YAYINLAR
+//  ⚙️  WI-FI BİLGİLERİ — istediğin kadar ağ ekle
 // ============================================================
-// Demo akışı:
-//   1. ESP açılır → "VitaPorta" SSID'sini yayınlar
-//   2. PC bu ağa bağlanır (şifre: vitaporta123) → 192.168.4.x IP alır
-//   3. PC'nin internete çıkışı USB tethering'den (iPhone Lightning) gelir
-//   4. Gateway: python -m gateway_agents.runner --esp 192.168.4.1
-//
-// ESP softAP IP'si default 192.168.4.1 (sabit). PC bu IP'ye HTTP istek atar:
-//   http://192.168.4.1/          → ana sayfa
-//   http://192.168.4.1:81/stream → MJPEG akış
-//   http://192.168.4.1/thermal   → AMG JSON
-//   http://192.168.4.1/verdict   → LED kararı (gateway GET)
+// Pi taşıma: ESP önce Pi hotspot'una bağlanır (STA modu).
+// Bağlanamazsa kendi AP'sini açar (VitaPorta-ESP32).
 // ============================================================
-const char* WIFI_SSID     = "VitaPorta";
-const char* WIFI_PASSWORD = "vitaporta123";   // WPA2, min 8 karakter şart
+struct WifiCred { const char* ssid; const char* pass; };
+static const WifiCred WIFI_NETWORKS[] = {
+  { "vita-porta",        "vitaporta2026" },   // Raspberry Pi hotspot (birincil)
+  { "Mert ali iPhone'u", "mert2015"      },   // yedek (geliştirme / test)
+};
 // ============================================================
 
 // ----- AI-Thinker ESP32-CAM pin haritası -----
@@ -1466,24 +1464,31 @@ void setup() {
     Serial.println("[AMG] Sensor olmadan devam (termal endpoint bos donecek)");
   }
 
-  Serial.printf("[WIFI] AP modu basliyor: SSID=%s\n", WIFI_SSID);
-  WiFi.mode(WIFI_AP);
-  // Subnet 192.168.4.0/24, ESP gateway sabit 192.168.4.1 (softAP default).
-  // PC bu ağa bağlandığında DHCP'den 192.168.4.2+ alır.
-  WiFi.softAPConfig(IPAddress(192, 168, 4, 1),
-                    IPAddress(192, 168, 4, 1),
-                    IPAddress(255, 255, 255, 0));
-  // channel=1 (en güvenli default), hidden=0, max_connection=4
-  bool ap_ok = WiFi.softAP(WIFI_SSID, WIFI_PASSWORD, 1, 0, 4);
+  WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
-  if (!ap_ok) {
-    Serial.println("[WIFI] AP BASLATILAMADI");
-    while (true) delay(1000);
+  for (const auto& net : WIFI_NETWORKS) {
+    wifiMulti.addAP(net.ssid, net.pass);
+    Serial.printf("[WIFI] Ag eklendi: %s\n", net.ssid);
   }
-  Serial.print("[WIFI] AP aktif. ESP IP: ");
-  Serial.println(WiFi.softAPIP());
-  Serial.printf("[WIFI] PC su aga baglansin: SSID='%s' sifre='%s'\n",
-                WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("[WIFI] Baglaniliyor");
+  uint32_t start = millis();
+  while (wifiMulti.run() != WL_CONNECTED && millis() - start < 20000) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println();
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[WIFI] BAGLANAMADI — AP moduna geciliyor");
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP("VitaPorta-ESP32", "vitaporta123");
+    IPAddress ap_ip = WiFi.softAPIP();
+    Serial.printf("[AP] SSID=VitaPorta-ESP32  sifre=vitaporta123  IP=%s\n", ap_ip.toString().c_str());
+    Serial.println("[AP] Bilgisayardan 'VitaPorta-ESP32' agina baglanin, sonra:");
+    Serial.printf("[AP] python -m gateway_agents.runner --esp %s\n", ap_ip.toString().c_str());
+  } else {
+    Serial.printf("[WIFI] Bagli: %s  IP: %s\n", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+    Serial.printf("[WIFI] RSSI: %d dBm\n", WiFi.RSSI());
+  }
 
   server.on("/", handleRoot);
   server.on("/capture", handleCapture);
@@ -1500,17 +1505,14 @@ void setup() {
 
   startStreamServer();
 
-  String ap_ip = WiFi.softAPIP().toString();
+  IPAddress my_ip = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP() : WiFi.softAPIP();
   Serial.println();
   Serial.println("=========================================");
-  Serial.println(">>> AP MODU AKTIF");
-  Serial.printf(">>> SSID      : %s\n", WIFI_SSID);
-  Serial.printf(">>> Sifre     : %s\n", WIFI_PASSWORD);
-  Serial.printf(">>> Ana sayfa : http://%s/\n", ap_ip.c_str());
-  Serial.printf(">>> Stream    : http://%s:81/stream\n", ap_ip.c_str());
-  Serial.printf(">>> Info JSON : http://%s/info\n", ap_ip.c_str());
-  Serial.printf(">>> Thermal   : http://%s/thermal\n", ap_ip.c_str());
-  Serial.println(">>> Gateway   : python -m gateway_agents.runner --esp 192.168.4.1");
+  Serial.printf(">>> Ana sayfa : http://%s/\n", my_ip.toString().c_str());
+  Serial.printf(">>> Stream    : http://%s:81/stream\n", my_ip.toString().c_str());
+  Serial.printf(">>> Info JSON : http://%s/info\n", my_ip.toString().c_str());
+  Serial.printf(">>> Thermal   : http://%s/thermal\n", my_ip.toString().c_str());
+  Serial.printf(">>> Gateway   : python -m gateway_agents.runner --esp %s\n", my_ip.toString().c_str());
   Serial.println("=========================================");
 }
 

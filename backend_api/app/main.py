@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from backend_api.app.event_bus import EventBus
+from orchestration.config import get_settings
 from orchestration.decisions_store import build_default_decision_store
 from orchestration.demo import ambiguous_case, critical_case, stable_case
 from orchestration.feedback_store import build_default_store
@@ -56,8 +57,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.decisions_store = build_default_decision_store()
     app.state.sessions_store = build_default_session_store()
     app.state.supervisor = Supervisor(feedback_store=app.state.feedback_store)
+
+    # Sentence-transformers modelini startup'ta ısıt: ilk kullanıcı isteği
+    # soğuk başlangıç (~12s) yerine sıcak (~17ms) RAG retrieval görür.
+    asyncio.create_task(_warmup_retriever(app.state.supervisor))
+
     logger.info("Vita Porta backend hazır.")
     yield
+
+
+async def _warmup_retriever(supervisor: Supervisor) -> None:
+    try:
+        await supervisor.retriever.retrieve("triaj değerlendirmesi ısınma", k=1)
+        logger.info("RAG retriever ısındı.")
+    except Exception as exc:
+        logger.warning("RAG ısınma başarısız (devam ediliyor): %s", exc)
 
 
 def _persist_decision(app: FastAPI, bundle: AgentBundle, decision: TriageDecision) -> None:
