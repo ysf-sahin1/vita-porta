@@ -1617,5 +1617,7 @@ void loop() {
     }
   }
 
-  delay(1);
+  // FreeRTOS scheduler'a CPU ver — MJPEG stream task'ının çalışmasına izin verir.
+  // portTICK_PERIOD_MS = 1ms/tick (ESP32 default). Açık RTOS API kullanımı.
+  vTaskDelay(1 / portTICK_PERIOD_MS);
 }
