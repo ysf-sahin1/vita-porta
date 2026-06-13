@@ -18,7 +18,7 @@ from orchestration.supervisor import Supervisor
 
 def critical_case() -> AgentBundle:
     return AgentBundle(
-        patient_id="demo-red",
+        patient_id="Ahmet Yıldız",
         gait=AgentObservation(
             agent="gait",
             confidence=0.76,
@@ -57,7 +57,7 @@ def critical_case() -> AgentBundle:
 
 def ambiguous_case() -> AgentBundle:
     return AgentBundle(
-        patient_id="demo-yellow",
+        patient_id="Fatma Demir",
         gait=AgentObservation(
             agent="gait",
             confidence=0.71,
@@ -96,7 +96,7 @@ def ambiguous_case() -> AgentBundle:
 
 def stable_case() -> AgentBundle:
     return AgentBundle(
-        patient_id="demo-green",
+        patient_id="Mehmet Kaya",
         gait=AgentObservation(
             agent="gait",
             confidence=0.80,

@@ -117,12 +117,22 @@ class Runner:
         if pir is not None:
             logger.info("PIR modu aktif — hareket algılanmadan analiz başlamaz.")
 
+        _last_pir_motion: bool | None = None
+
         try:
             while True:
                 if pir is not None and not pir.motion_detected:
+                    if _last_pir_motion is not False:
+                        _last_pir_motion = False
+                        self._report_pir_state(motion=False)
                     logger.info("PIR: hareket bekleniyor...")
                     pir.wait_for_motion()
                     logger.info("PIR: hareket algılandı, analiz başlıyor.")
+                    _last_pir_motion = True
+                    self._report_pir_state(motion=True)
+                elif pir is not None and _last_pir_motion is None:
+                    _last_pir_motion = True
+                    self._report_pir_state(motion=True)
 
                 bundle = self.run_once()
                 if bundle is None:
@@ -250,6 +260,14 @@ class Runner:
         # esp_host yoksa (webcam/video/test) atlanır.
         if self.esp_host and isinstance(category, str):
             self._push_verdict(category)
+
+    def _report_pir_state(self, motion: bool) -> None:
+        """PIR durumunu backend'e bildir — best-effort, hata yutulur."""
+        url = f"{self.backend_url}/api/pir/report"
+        try:
+            self._http.post(url, json={"motion": motion}, timeout=2.0)
+        except httpx.HTTPError as exc:
+            logger.debug("PIR raporu gönderilemedi (%s): %s", url, exc)
 
     def _push_verdict(self, category: str) -> None:
         """ESP /verdict endpoint'ini çağır — best-effort, hata yutulur."""

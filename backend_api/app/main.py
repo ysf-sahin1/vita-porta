@@ -57,6 +57,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.decisions_store = build_default_decision_store()
     app.state.sessions_store = build_default_session_store()
     app.state.supervisor = Supervisor(feedback_store=app.state.feedback_store)
+    app.state.pir_motion: bool | None = None
 
     # Sentence-transformers modelini startup'ta ısıt: ilk kullanıcı isteği
     # soğuk başlangıç (~12s) yerine sıcak (~17ms) RAG retrieval görür.
@@ -241,6 +242,31 @@ async def end_session(body: _SessionEndBody) -> dict:
         record.session_id,
     )
     return {"closed": True, "session": record.model_dump(mode="json")}
+
+
+class _PirReportBody(BaseModel):
+    motion: bool
+
+
+@app.post("/api/pir/report")
+async def report_pir(body: _PirReportBody) -> dict:
+    """Gateway runner'dan PIR hareket durumu güncelleme.
+
+    Runner hareket başladığında motion=True, biterken motion=False gönderir.
+    Durum SSE üzerinden dashboard'a yayınlanır.
+    """
+    app.state.pir_motion = body.motion
+    bus: EventBus = app.state.event_bus
+    await bus.publish(
+        TriageEvent(type="pir_status", pir_motion=body.motion)
+    )
+    return {"pir_motion": body.motion}
+
+
+@app.get("/api/pir/status")
+async def get_pir_status() -> dict:
+    """Son bilinen PIR durumunu döner — frontend ilk yüklemede çağırabilir."""
+    return {"pir_motion": app.state.pir_motion}
 
 
 @app.get("/api/sessions")

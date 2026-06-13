@@ -1,6 +1,6 @@
 "use client";
 
-import { fetchHistory, postFeedback, resetHistory as resetHistoryApi, streamUrl } from "@/lib/api";
+import { fetchHistory, fetchPirStatus, postFeedback, resetHistory as resetHistoryApi, streamUrl } from "@/lib/api";
 import type {
   AgentObservation,
   DecisionRecord,
@@ -50,6 +50,8 @@ export interface StreamSnapshot {
   resetHistory: () => Promise<void>;
   lastObservationAt: number | null;
   lastDecisionLatencyMs: number | null;
+  /** PIR hareket durumu: true=hareket var, false=hareket yok, null=bilinmiyor */
+  pirMotion: boolean | null;
 }
 
 export function entryKey(patientId: string, decidedAt: string): string {
@@ -70,6 +72,7 @@ export function useTriageStream(): StreamSnapshot {
   const [verdictNurses, setVerdictNurses] = useState<Record<string, NurseMeta>>({});
   const [lastObservationAt, setLastObservationAt] = useState<number | null>(null);
   const [lastDecisionLatencyMs, setLastDecisionLatencyMs] = useState<number | null>(null);
+  const [pirMotion, setPirMotion] = useState<boolean | null>(null);
 
   const sourceRef = useRef<EventSource | null>(null);
   const patientObsRef = useRef<{ id: string | null; obs: Observations }>({ id: null, obs: {} });
@@ -87,6 +90,13 @@ export function useTriageStream(): StreamSnapshot {
     };
     // restoreHistoryFromBackend stable; bağımlılık eklenmesine gerek yok.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ---- Mount: son bilinen PIR durumunu çek -----------------------------------
+  useEffect(() => {
+    fetchPirStatus().then(({ pir_motion }) => {
+      if (pir_motion !== null) setPirMotion(pir_motion);
+    }).catch(() => {/* sessizce geç */});
   }, []);
 
   async function restoreHistoryFromBackend(cancelled: boolean): Promise<void> {
@@ -156,6 +166,11 @@ export function useTriageStream(): StreamSnapshot {
     setStatus("connecting");
 
     es.addEventListener("heartbeat", () => setStatus("live"));
+
+    es.addEventListener("pir_status", (ev) => {
+      const data = JSON.parse((ev as MessageEvent).data) as { pir_motion: boolean };
+      setPirMotion(data.pir_motion);
+    });
 
     es.addEventListener("agent_observation", (ev) => {
       const data = JSON.parse((ev as MessageEvent).data) as {
@@ -321,6 +336,7 @@ export function useTriageStream(): StreamSnapshot {
     resetHistory,
     lastObservationAt,
     lastDecisionLatencyMs,
+    pirMotion,
   };
 }
 

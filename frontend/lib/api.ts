@@ -65,6 +65,25 @@ export async function endSessionApi(sessionId: string): Promise<void> {
   }
 }
 
+export async function reportPirStatus(motion: boolean): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/pir/report`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ motion }),
+  });
+  if (!res.ok) throw new Error(`PIR raporu gönderilemedi (${res.status})`);
+}
+
+export async function fetchPirStatus(): Promise<{ pir_motion: boolean | null }> {
+  try {
+    const res = await fetch(`${API_BASE}/api/pir/status`);
+    if (!res.ok) return { pir_motion: null };
+    return res.json();
+  } catch {
+    return { pir_motion: null };
+  }
+}
+
 export async function fetchSessions(limit = 20): Promise<NurseSessionRecord[]> {
   const res = await fetch(`${API_BASE}/api/sessions?limit=${limit}`);
   if (!res.ok) throw new Error(`mesai geçmişi alınamadı (${res.status})`);

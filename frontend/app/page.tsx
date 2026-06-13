@@ -9,6 +9,7 @@ import {
   formatVerdictTime,
   type Verdict,
 } from "@/components/NurseVerdict";
+import { PirStatusBanner } from "@/components/PirStatusBanner";
 import { SessionGate } from "@/components/SessionGate";
 import { TriageCard } from "@/components/TriageCard";
 import { entryKey, useTriageStream } from "@/components/useTriageStream";
@@ -33,15 +34,12 @@ function Dashboard() {
     resetHistory,
     lastObservationAt,
     lastDecisionLatencyMs,
+    pirMotion,
   } = useTriageStream();
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
   const observations = current?.observations ?? {};
-  const isRealPatient = current?.patientId
-    ? !current.patientId.startsWith("demo-")
-    : false;
-  const showDemoControls = !isRealPatient;
 
   const currentKey = current?.decision
     ? entryKey(current.patientId, current.decision.decided_at)
@@ -64,6 +62,8 @@ function Dashboard() {
         lastObservationAt={lastObservationAt}
         lastDecisionLatencyMs={lastDecisionLatencyMs}
       />
+
+      <PirStatusBanner pirMotion={pirMotion} />
 
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px] gap-6">
         <section className="space-y-6 min-w-0">
@@ -103,16 +103,14 @@ function Dashboard() {
         </aside>
       </div>
 
-      {showDemoControls && (
-        <details className="rounded-2xl bg-white/60 backdrop-blur-xl border border-white/60 shadow-glass">
-          <summary className="cursor-pointer select-none px-5 py-3 text-xs uppercase tracking-wider text-slate-500 font-medium">
-            Geliştirici · Demo senaryoları
-          </summary>
-          <div className="px-5 pb-5">
-            <DemoControls />
-          </div>
-        </details>
-      )}
+      <details className="rounded-2xl bg-white/60 backdrop-blur-xl border border-white/60 shadow-glass">
+        <summary className="cursor-pointer select-none px-5 py-3 text-xs uppercase tracking-wider text-slate-500 font-medium">
+          Geliştirici · Demo senaryoları
+        </summary>
+        <div className="px-5 pb-5">
+          <DemoControls />
+        </div>
+      </details>
 
       <footer className="text-center text-xs text-slate-400 pt-4">
         Vita Porta · CODEX AI Hackathon 2026 · Bu sistem tanı koymaz, son karar her zaman triaj

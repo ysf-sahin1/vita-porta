@@ -240,9 +240,10 @@ class NurseSession(BaseModel):
 class TriageEvent(BaseModel):
     """Wire envelope pushed over SSE to the dashboard."""
 
-    type: Literal["agent_observation", "decision", "error", "heartbeat"]
+    type: Literal["agent_observation", "decision", "error", "heartbeat", "pir_status"]
     patient_id: str | None = None
     observation: AgentObservation | None = None
     decision: TriageDecision | None = None
     message: str | None = None
+    pir_motion: bool | None = None
     emitted_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

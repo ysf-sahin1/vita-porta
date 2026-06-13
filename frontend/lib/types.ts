@@ -73,4 +73,5 @@ export type TriageEvent =
   | { type: "agent_observation"; patient_id: string; observation: AgentObservation; emitted_at: string }
   | { type: "decision"; patient_id: string; decision: TriageDecision; emitted_at: string }
   | { type: "heartbeat"; emitted_at: string; message?: string }
-  | { type: "error"; emitted_at: string; message: string };
+  | { type: "error"; emitted_at: string; message: string }
+  | { type: "pir_status"; pir_motion: boolean; emitted_at: string };
