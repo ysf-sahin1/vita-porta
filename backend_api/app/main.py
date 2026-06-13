@@ -17,6 +17,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,6 +25,9 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from backend_api.app.event_bus import EventBus
+from benchmarking.datasets import synthetic_baseline_dataset
+from benchmarking.evaluator import build_benchmark_supervisor, evaluate_dataset
+from benchmarking.store import BenchmarkReportStore
 from orchestration.config import get_settings
 from orchestration.decisions_store import build_default_decision_store
 from orchestration.demo import ambiguous_case, critical_case, stable_case
@@ -56,6 +60,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.feedback_store = build_default_store()
     app.state.decisions_store = build_default_decision_store()
     app.state.sessions_store = build_default_session_store()
+    app.state.benchmark_store = BenchmarkReportStore()
+    app.state.benchmark_lock = asyncio.Lock()
     app.state.supervisor = Supervisor(feedback_store=app.state.feedback_store)
     app.state.pir_motion: bool | None = None
 
@@ -276,6 +282,26 @@ async def list_sessions(limit: int = 20) -> dict[str, list[dict]]:
     records = app.state.sessions_store.list_all()
     limited = records[: max(1, min(limit, 200))]
     return {"sessions": [r.model_dump(mode="json") for r in limited]}
+
+
+@app.get("/api/benchmark/latest")
+async def latest_benchmark() -> dict:
+    """Return the latest persisted benchmark report, if one exists."""
+
+    report = app.state.benchmark_store.load()
+    return {"report": report.model_dump(mode="json") if report else None}
+
+
+@app.post("/api/benchmark/run")
+async def run_benchmark(engine: Literal["mock", "configured"] = "mock") -> dict:
+    """Run the labelled synthetic baseline without touching live triage history."""
+
+    async with app.state.benchmark_lock:
+        dataset = synthetic_baseline_dataset()
+        supervisor = build_benchmark_supervisor(engine)
+        report = await evaluate_dataset(dataset, supervisor, engine=engine)
+        app.state.benchmark_store.save(report)
+    return report.model_dump(mode="json")
 
 
 @app.post("/api/triage/demo")

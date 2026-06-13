@@ -69,6 +69,49 @@ export interface NurseSessionRecord {
   logout_at: string | null;
 }
 
+export interface BenchmarkCaseResult {
+  case_id: string;
+  expected_category: TriageCategory;
+  predicted_category: TriageCategory;
+  correct: boolean;
+  critical_miss: boolean;
+  under_triage: boolean;
+  over_triage: boolean;
+  input_type: string;
+  confidence: number;
+  latency_ms: number;
+  agent_confidences: Record<string, number>;
+  notes: string;
+  tags: string[];
+  error: string | null;
+}
+
+export interface BenchmarkMetrics {
+  total_cases: number;
+  correct_cases: number;
+  accuracy: number;
+  red_sensitivity: number | null;
+  critical_miss_rate: number | null;
+  under_triage_rate: number;
+  over_triage_rate: number;
+  insufficient_rate: number;
+  mean_latency_ms: number;
+  p95_latency_ms: number;
+  category_recall: Record<TriageCategory, number | null>;
+  confusion_matrix: Record<TriageCategory, Record<TriageCategory, number>>;
+}
+
+export interface BenchmarkReport {
+  dataset_name: string;
+  dataset_version: string;
+  dataset_description: string;
+  synthetic: boolean;
+  engine: string;
+  created_at: string;
+  metrics: BenchmarkMetrics;
+  results: BenchmarkCaseResult[];
+}
+
 export type TriageEvent =
   | { type: "agent_observation"; patient_id: string; observation: AgentObservation; emitted_at: string }
   | { type: "decision"; patient_id: string; decision: TriageDecision; emitted_at: string }

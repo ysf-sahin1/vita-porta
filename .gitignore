@@ -32,6 +32,7 @@ orchestration/rag/.chroma/
 .feedback/
 .decisions/
 .sessions/
+.benchmark/
 
 # OS
 .DS_Store

@@ -1,6 +1,7 @@
 "use client";
 
 import { AgentPanel } from "@/components/AgentPanel";
+import { BenchmarkPanel } from "@/components/BenchmarkPanel";
 import { DemoControls } from "@/components/DemoControls";
 import { Header } from "@/components/Header";
 import { HistoryDetailModal } from "@/components/HistoryDetailModal";
@@ -102,6 +103,8 @@ function Dashboard() {
           />
         </aside>
       </div>
+
+      <BenchmarkPanel />
 
       <details className="rounded-2xl bg-white/60 backdrop-blur-xl border border-white/60 shadow-glass">
         <summary className="cursor-pointer select-none px-5 py-3 text-xs uppercase tracking-wider text-slate-500 font-medium">

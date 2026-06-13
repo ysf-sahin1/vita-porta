@@ -1,0 +1,50 @@
+{
+  "name": "Uzman Etiketli Örnek Set",
+  "version": "0.1.0",
+  "description": "Kendi uzman etiketli bundle veya video vakalarınız için başlangıç manifesti.",
+  "synthetic": false,
+  "cases": [
+    {
+      "case_id": "expert-green-001",
+      "expected_category": "green",
+      "notes": "Bu örnekte etiket gerçek kullanımda yetkili klinik uzman tarafından verilmelidir.",
+      "tags": ["expert-labelled", "green"],
+      "bundle": {
+        "patient_id": "expert-green-001",
+        "gait": {
+          "agent": "gait",
+          "confidence": 0.85,
+          "summary_tr": "Dik ve simetrik yürüyüş",
+          "signals": {
+            "sway": false,
+            "severity": "none",
+            "symmetry": 0.92
+          }
+        },
+        "thermal": {
+          "agent": "thermal",
+          "confidence": 0.9,
+          "summary_tr": "Termal ölçüm normal aralıkta",
+          "signals": {
+            "temp_estimate_c": 36.6,
+            "fever_flag": false,
+            "hypothermia_flag": false,
+            "sensor_type": "amg8833"
+          }
+        },
+        "expression": {
+          "agent": "expression",
+          "confidence": 0.75,
+          "summary_tr": "Yüz ifadesi sakin",
+          "signals": {
+            "expression_state": "sakin",
+            "pain_score": 0.08,
+            "face_asymmetry": 0.1,
+            "consciousness_hint": "uyanık",
+            "sensor_type": "geometric_proxy"
+          }
+        }
+      }
+    }
+  ]
+}

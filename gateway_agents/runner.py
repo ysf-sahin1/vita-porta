@@ -87,8 +87,12 @@ class Runner:
 
     # ------------------------------------------------------------------ public
 
-    def run_once(self) -> AgentBundle | None:
-        """Collect one window, analyse it, POST the bundle, return it."""
+    def analyze_once(self) -> AgentBundle | None:
+        """Collect and analyse one window without posting it to the backend.
+
+        Benchmark and offline evaluation flows use this method so the exact
+        gateway agents can be measured without polluting live triage history.
+        """
 
         window = self._collect_window()
         if window is None:
@@ -104,6 +108,14 @@ class Runner:
 
         bundle = self._analyze(window)
         self._log_bundle(bundle)
+        return bundle
+
+    def run_once(self) -> AgentBundle | None:
+        """Collect one window, analyse it, POST the bundle, return it."""
+
+        bundle = self.analyze_once()
+        if bundle is None:
+            return None
         self._post_bundle(bundle)
         return bundle
 
@@ -177,7 +189,7 @@ class Runner:
 
     # ---------------------------------------------------------------- context
 
-    def __enter__(self) -> "Runner":
+    def __enter__(self) -> Runner:
         return self
 
     def __exit__(

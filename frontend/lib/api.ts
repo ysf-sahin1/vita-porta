@@ -1,4 +1,9 @@
-import type { HistoryResponse, NurseFeedback, NurseSessionRecord } from "./types";
+import type {
+  BenchmarkReport,
+  HistoryResponse,
+  NurseFeedback,
+  NurseSessionRecord,
+} from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
@@ -89,4 +94,19 @@ export async function fetchSessions(limit = 20): Promise<NurseSessionRecord[]> {
   if (!res.ok) throw new Error(`mesai geçmişi alınamadı (${res.status})`);
   const data = (await res.json()) as { sessions: NurseSessionRecord[] };
   return data.sessions ?? [];
+}
+
+export async function fetchLatestBenchmark(): Promise<BenchmarkReport | null> {
+  const res = await fetch(`${API_BASE}/api/benchmark/latest`);
+  if (!res.ok) throw new Error(`benchmark raporu alınamadı (${res.status})`);
+  const data = (await res.json()) as { report: BenchmarkReport | null };
+  return data.report;
+}
+
+export async function runBenchmark(
+  engine: "mock" | "configured" = "mock",
+): Promise<BenchmarkReport> {
+  const res = await fetch(`${API_BASE}/api/benchmark/run?engine=${engine}`, { method: "POST" });
+  if (!res.ok) throw new Error(`benchmark çalıştırılamadı (${res.status})`);
+  return res.json();
 }

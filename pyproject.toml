@@ -56,7 +56,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["orchestration*", "gateway_agents*", "backend_api*"]
+include = ["orchestration*", "gateway_agents*", "backend_api*", "benchmarking*"]
 
 [tool.ruff]
 line-length = 100
@@ -67,4 +67,4 @@ select = ["E", "F", "I", "B", "UP", "ASYNC"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["orchestration/tests", "gateway_agents/tests", "backend_api/tests"]
+testpaths = ["orchestration/tests", "gateway_agents/tests", "backend_api/tests", "benchmarking/tests"]

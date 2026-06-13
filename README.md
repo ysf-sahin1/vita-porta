@@ -28,6 +28,7 @@ CODEX AI Hackathon 2026 · Tıp ve Sağlık Teknolojileri
 | `orchestration/` | LangGraph supervisor + ESI prompt'ları + ChromaDB RAG |
 | `backend_api/` | FastAPI + Server-Sent Events ile hemşire dashboard'una canlı yayın |
 | `frontend/` | Next.js 14 hemşire dashboard'u (Tailwind + shadcn/ui) |
+| `benchmarking/` | Etiketli vaka çalıştırıcısı + güvenlik metrikleri + manifest desteği |
 | `infrastructure/` | Raspberry Pi kurulum scripti + systemd servis dosyaları |
 | `docs/` | Pitch, teknik rapor, ek dokümantasyon |
 
@@ -108,6 +109,75 @@ ESP32 bağlıysa gerçek donanımla çalıştır:
 ```bash
 python -m gateway_agents.runner --esp 192.168.4.2 --pir-pin 17
 ```
+
+---
+
+## Klinik Benchmark ve Ölçüm Ekranı
+
+Benchmark altyapısı, etiketli vakalarda sistem önerisini beklenen uzman
+kategorisiyle karşılaştırır. Dashboard'daki **Benchmark ve güvenlik ölçümleri**
+paneli şu değerleri gösterir:
+
+- Kırmızı vaka yakalama oranı (`red_sensitivity`)
+- Kritik vaka kaçırma oranı
+- Düşük öncelik ve aşırı öncelik verme oranları
+- Veri yetersiz sonucu üretme oranı
+- Ortalama ve P95 karar süresi
+- Kırmızı / Sarı / Yeşil / Veri Yetersiz confusion matrix
+
+Repoyla birlikte gelen 11 vakalık sentetik baseline'ı çalıştır:
+
+```bash
+python -m benchmarking.runner
+```
+
+Rapor `.benchmark/latest.json` dosyasına yazılır. Backend ve frontend açıksa aynı
+baseline dashboard'daki **Sentetik baseline çalıştır** butonuyla da
+çalıştırılabilir.
+
+`.env` ile yapılandırılmış gerçek LLM sağlayıcısını ölçmek için:
+
+```bash
+python -m benchmarking.runner --engine configured
+```
+
+Kendi uzman etiketli bundle manifestini çalıştır:
+
+```bash
+python -m benchmarking.runner \
+  --manifest benchmarking/manifest.example.json \
+  --out .benchmark/expert-report.json
+```
+
+Video vakası eklemek için manifestte `bundle` yerine, manifest dosyasına göre
+göreli veya mutlak bir `video_path` verilebilir:
+
+```json
+{
+  "case_id": "expert-red-video-001",
+  "expected_category": "red",
+  "video_path": "../data/expert-red-video-001.mp4",
+  "window_duration_s": 3.0,
+  "tags": ["expert-labelled", "red"]
+}
+```
+
+Video benchmarkı mevcut `VideoFileSource` ve üç görsel ajanı kullanır; ekstra
+donanım gerektirmez. Sensör ve Raspberry Pi performansını ölçmek için aynı
+senaryolar ayrıca gerçek ESP32-CAM + AMG8833 hattında çalıştırılmalıdır.
+
+> **Önemli:** Repodaki sentetik baseline yalnızca benchmark altyapısını ve karar
+> regresyonlarını doğrular. Klinik performans iddiası için vakaların yetkili
+> klinik uzmanlarca etiketlenmesi, temsili bir veri seti kullanılması ve sonuçların
+> bağımsız olarak incelenmesi gerekir.
+
+Benchmark API uçları:
+
+| Metot | Uç | Açıklama |
+|-------|----|----------|
+| `GET` | `/api/benchmark/latest` | Son kaydedilmiş raporu döndürür |
+| `POST` | `/api/benchmark/run?engine=mock` | Tekrarlanabilir sentetik baseline çalıştırır |
+| `POST` | `/api/benchmark/run?engine=configured` | Yapılandırılmış LLM ile baseline çalıştırır |
 
 ---
 
